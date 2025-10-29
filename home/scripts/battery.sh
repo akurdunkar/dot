@@ -9,4 +9,4 @@ minValue=20
 
 ! [[ $batteryPercentage -lt $minValue ]] && rm "$NFILE"
 
-printf " ^c$YELLOW_COLOR^  $batteryPercentage $( [ $charging == "Charging," ] && echo " " )"
+printf " ^c$YELLOW_COLOR^  $batteryPercentage $([ $charging == "Charging," ] && echo " ")"
