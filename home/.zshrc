@@ -128,5 +128,3 @@ PROMPT+="\$vcs_info_msg_0_ % %{$fg[$PROMPT_COLOR]%}%% %{$reset_color%}"
 # Prompt Ends-----------------------------------------------------------------
 
 ! [[ -z $E_ZPROF ]] && zprof > $HOME/zsh.log
-
-# cmd_exists fortune && cmd_exists cowsay && fortune | cowsay
