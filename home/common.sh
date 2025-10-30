@@ -9,7 +9,7 @@ __source__() {
 
 	# Check if hostname-specific file exists
 	if [[ -f "$file" ]]; then
-		source "$HOME/common.priv.sh"
+		source "$HOME/$1.sh" # Source common file first
 		source "$file"
 	else
 		echo "Unable to find priv files for $hostname.."
