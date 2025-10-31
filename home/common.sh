@@ -5,19 +5,20 @@
 #-(Source Files)--------------------------------------------------------------
 __source__() {
 	local hostname=$(hostname)
-	local file="$HOME/$hostname/$1.sh"
+	local file="$HOME/$hostname/$1"
 
 	# Check if hostname-specific file exists
 	if [[ -f "$file" ]]; then
-		source "$HOME/$1.sh" # Source common file first
+		source "$HOME/$1" # Source common file first
 		source "$file"
 	else
 		echo "Unable to find priv files for $hostname.."
 	fi
 }
 
-__source__ env
-__source__ alias
+__source__ env.sh
+__source__ alias.sh
+__source__ rc
 
 #-(Create files/folders that don't exist but are required )-------------------
 
