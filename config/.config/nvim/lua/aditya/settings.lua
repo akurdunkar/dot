@@ -29,7 +29,7 @@ vim.opt.termguicolors = true
 
 vim.cmd [[
     syntax enable
-    color base16-gruvbox-dark-pale
+    color github_dark
     syntax on
 ]]
 
