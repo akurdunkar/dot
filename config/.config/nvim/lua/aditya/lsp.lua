@@ -1,5 +1,3 @@
-local lspconfig = require('lspconfig')
-
 local servers = {
     "clangd",
     "vimls",
@@ -101,7 +99,7 @@ end
 
 -- Use a loop to conveniently call 'setup' on multiple servers and
 -- map buffer local keybindings when the language server attaches
-for _, lsp in ipairs(servers) do lspconfig[lsp].setup(get_configuration(lsp)) end
+for _, lsp in ipairs(servers) do vim.lsp.config[lsp] = get_configuration(lsp) end
 
 vim.diagnostic.config({
     virtual_text = true,

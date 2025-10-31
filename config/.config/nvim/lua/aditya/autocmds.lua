@@ -23,17 +23,3 @@ vim.api.nvim_create_autocmd("TermOpen", {
         vim.cmd("setlocal nonu nornu")
     end
 })
-
-vim.api.nvim_create_autocmd({ "LspAttach" }, {
-  pattern = { "*.c", "*.cpp", "*.h", "*.hpp", "*.cc", "*.cxx", "*.hh", "*.hxx" },
-  callback = function()
-    local pids = vim.fn.systemlist(
-      [[ps aux | grep '[c]langd' | grep -v -- '--query-driver' | awk '{print $2}']]
-    )
-    if #pids > 0 then
-      vim.fn.system("kill " .. table.concat(pids, " "))
-      vim.notify("Killed extra clangd processes: " .. table.concat(pids, ", "), vim.log.levels.INFO)
-    end
-  end,
-})
-
