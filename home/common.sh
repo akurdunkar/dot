@@ -253,3 +253,52 @@ sb() {
 		source ~/.bashrc
 	fi
 }
+
+#-(Bash Completion Functions)-------------------------------------------------
+
+# Completion for conf command
+_conf_completions() {
+	local cur="${COMP_WORDS[COMP_CWORD]}"
+	local prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+	if [[ -d "$HOME/.config" ]]; then
+		COMPREPLY=($(compgen -W "$(\ls $HOME/.config 2>/dev/null)" -- "$cur"))
+	fi
+}
+complete -F _conf_completions conf
+
+# Completion for venv command
+_venv_completions() {
+	local cur="${COMP_WORDS[COMP_CWORD]}"
+	local prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+	if [[ $COMP_CWORD -eq 1 ]]; then
+		COMPREPLY=($(compgen -W "new remove source -f" -- "$cur"))
+	elif [[ $COMP_CWORD -eq 2 ]] && [[ -d "$VENV_DIR" ]]; then
+		COMPREPLY=($(compgen -W "$(\ls $VENV_DIR 2>/dev/null)" -- "$cur"))
+	fi
+}
+complete -F _venv_completions venv
+
+# Completion for cco command
+_cco_completions() {
+	local cur="${COMP_WORDS[COMP_CWORD]}"
+	local prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+	if [[ -d "$CODE_DIR" ]]; then
+		COMPREPLY=($(compgen -W "$(\ls $CODE_DIR 2>/dev/null)" -- "$cur"))
+	fi
+}
+complete -F _cco_completions cco
+
+# Completion for note command
+_note_completions() {
+	local cur="${COMP_WORDS[COMP_CWORD]}"
+	local prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+	if [[ $COMP_CWORD -eq 1 ]] && [[ -d "$NOTES_DIR" ]]; then
+		local notes=$(\ls $NOTES_DIR/*.md 2>/dev/null | awk -F/ '{print $NF}')
+		COMPREPLY=($(compgen -W "$notes" -- "$cur"))
+	fi
+}
+complete -F _note_completions note

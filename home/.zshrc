@@ -63,35 +63,6 @@ preexec() { echo -ne '\e[5 q' ;} # Use beam shape cursor for each new prompt.
 
 #-----------------------------------------------------------------------------
 
-compdef __conf_completions__ conf
-function __conf_completions__(){
-    _arguments -C \
-        "1: :($(ls $HOME/.config))" \
-        "2: :($(ls $HOME/.config))"
-}
-
-compdef __venv_completions__ venv
-function __venv_completions__(){
-    _arguments -C \
-        "1: :(new remove source -f)" \
-        "2: :($(ls $VENV_DIR))"
-}
-
-compdef __cco_completions__ cco
-function __cco_completions__(){
-    _arguments -C \
-        "1: :($(ls $CODE_DIR))" \
-        "2: :($(ls $CODE_DIR))"
-}
-
-compdef __note_completions__ note
-function __note_completions__(){
-    _arguments -C \
-        "1: :($(ls $NOTES_DIR/*.md | awk -F/ '{print $NF}'))"
-}
-
-#-----------------------------------------------------------------------------
-
 source $HOME/common.sh
 envm
 
