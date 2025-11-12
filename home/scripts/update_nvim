@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+
+import sys
+import subprocess
+import requests
+from pathlib import Path
+from typing import Tuple
+from github import Github
+
+INSTALL_DIR: Path = Path.home() / ".local" / "bin"
+NVIM_PATH: Path = INSTALL_DIR / "nvim"
+DOWNLOAD_ASSET: str = "nvim-linux-x86_64.appimage"
+
+
+def get_current_version() -> str:
+    try:
+        result = subprocess.run(["nvim", "--version"], capture_output=True, text=True)
+        return result.stdout.split()[1].lstrip("v")
+    except (FileNotFoundError, IndexError):
+        return "0.0.0"
+
+
+def get_latest_release() -> Tuple[str, str]:
+    g = Github()
+    repo = g.get_repo("neovim/neovim")
+    latest = repo.get_latest_release()
+    version: str = latest.tag_name.lstrip("v")
+
+    # Find the AppImage asset
+    for asset in latest.get_assets():
+        if asset.name == DOWNLOAD_ASSET:
+            return version, asset.browser_download_url
+
+    raise ValueError("AppImage not found in release assets")
+
+
+def version_tuple(version: str) -> Tuple[int, ...]:
+    return tuple(map(int, version.split(".")))
+
+
+def download_and_install(version: str, url: str) -> None:
+    print(f"Downloading Neovim v{version}...")
+    response = requests.get(url, stream=True)
+    response.raise_for_status()
+
+    # Create install directory
+    INSTALL_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Backup existing version
+    if NVIM_PATH.exists():
+        backup: Path = NVIM_PATH.with_suffix(".backup")
+        NVIM_PATH.rename(backup)
+
+    # Write new AppImage
+    with open(NVIM_PATH, "wb") as f:
+        for chunk in response.iter_content(chunk_size=8192):
+            f.write(chunk)
+
+    # Make executable
+    NVIM_PATH.chmod(0o755)
+
+    # Remove backup on success
+    backup: Path = NVIM_PATH.with_suffix(".backup")
+    if backup.exists():
+        backup.unlink()
+
+    print(f"✓ Successfully installed Neovim v{version}")
+
+
+def main() -> None:
+    current: str = get_current_version()
+    print(f"Current version: v{current}")
+
+    latest: str
+    url: str
+    latest, url = get_latest_release()
+    print(f"Latest version: v{latest}")
+
+    if version_tuple(current) < version_tuple(latest):
+        response: str = input(f"Update from v{current} to v{latest}? [y/N] ")
+        if response.lower() == "y":
+            download_and_install(latest, url)
+        else:
+            print("Update cancelled")
+    else:
+        print("Already up to date")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
