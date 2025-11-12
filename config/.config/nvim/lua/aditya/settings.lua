@@ -6,6 +6,8 @@ vim.g["fzf_preview_window"]            = {}
 vim.g["fzf_layout"]                    = { down = '20%' }
 vim.g["everforest_background"]         = 'hard'
 vim.g["everforest_better_performance"] = 1
+vim.g["sonokai_style"]                 = 'atlantis'
+vim.g["sonokai_better_performance"]    = 1
 
 if vim.fn.has("wsl") == 1 then
     vim.cmd [[
@@ -29,7 +31,7 @@ vim.opt.termguicolors = true
 
 vim.cmd [[
     syntax enable
-    color github_dark
+    color sonokai
     syntax on
 ]]
 
