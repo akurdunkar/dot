@@ -23,10 +23,10 @@ static const char *fonts[]                 =   { "Ubuntu Mono Nerd Font:size=12:
 static const char dmenufont[]              =   "Ubuntu Mono Nerd Font:size=12:style=Normal";
 static const char col_statusbar_fg[]       =   "#ffffff";
 static const char col_statusbar_bg[]       =   "#000000";
-static const char col_primary_fg[]         =   "#ffee00";
-static const char col_primary_bg[]         =   "#000000";
+static const char col_primary_fg[]         =   "#ffffff";
+static const char col_primary_bg[]         =   "#1c4289";
 static const char col_border[]             =   "#000000";
-static const char col_border_sel[]         =   "#ffee00";
+static const char col_border_sel[]         =   "#1c4289";
 static const int BORDER_PX = 0;
 static const char gspt_config[]            =   "/home/aditya/.config/alacritty/gspt.toml";
 
@@ -101,7 +101,7 @@ static const Layout layouts[] = {
 static char dmenumon[2]              = "0"; /* component of dmenucmd, manipulated in spawn() */
 static const char *dmenucmd[]        = { "dmenu_run", "-p", ">", "-m", dmenumon, "-fn", dmenufont, "-sb", col_primary_bg};
 static const char *termcmd[]         = { "/usr/bin/alacritty", NULL };
-static const char *web[]             = { "/usr/bin/firefox", NULL };
+static const char *web[]             = { "/usr/bin/microsoft-edge", NULL };
 static const char *torrentcli[]      = { "t", "alacritty", "-t", "tremc" , "-e", "tremc", NULL};
 static const char *fileManager[]     = { "n", "/usr/bin/thunar", NULL };
 static const char *colorChooser[]    = { "c", "/usr/bin/kcolorchooser", NULL };
@@ -151,8 +151,10 @@ static Key keys[] = {
   { MODKEY|ShiftMask,                       XK_r,                        setlayout,             {.v = &layouts[5]} },
   { MODKEY,                                 XK_z,                        spawn,                 SHCMD("unzipFiles")},
   { MODKEY,                                 XK_b,                        togglebar,             {0} },
-  { MODKEY,                                 XK_j,                        focusstack,            {.i = +1 } },
-  { MODKEY,                                 XK_k,                        focusstack,            {.i = -1 } },
+  { MODKEY,                                 XK_j,                        focusstackvis,         {.i = +1 } },
+  { MODKEY,                                 XK_k,                        focusstackvis,         {.i = -1 } },
+  { MODKEY|ShiftMask,                       XK_j,                        focusstackhid,         {.i = +1 } },
+  { MODKEY|ShiftMask,                       XK_k,                        focusstackhid,         {.i = -1 } },
   { MODKEY|ShiftMask,                       XK_minus,                    incnmaster,            {.i = +1 } },
   { MODKEY,                                 XK_d,                        incnmaster,            {.i = -1 } },
   { MODKEY,                                 XK_h,                        setmfact,              {.f = -0.05} },
@@ -175,6 +177,8 @@ static Key keys[] = {
   { MODKEY|ShiftMask,                       XK_equal,                    setgaps,               {.i = 0  } },
   { MODKEY|ShiftMask,                       XK_u,                        setlayout,             {.v = &layouts[6]} },
   { MODKEY|ShiftMask,                       XK_space,                    togglefloating,        {0} },
+  { MODKEY,                                 XK_s,                        show,                  {0} },
+  { MODKEY,                                 XK_t,                        hide,                  {0} },
   TAGKEYS(                                  XK_1,                        0)
   TAGKEYS(                                  XK_2,                        1)
   TAGKEYS(                                  XK_3,                        2)
@@ -193,6 +197,7 @@ static Button buttons[] = {
     /* click                event mask      button          function        argument */
     { ClkLtSymbol,          0,              Button1,        setlayout,      {0} },
     { ClkLtSymbol,          0,              Button3,        setlayout,      {.v = &layouts[2]} },
+    { ClkWinTitle,          0,              Button1,        togglewin,      {0} },
     { ClkWinTitle,          0,              Button2,        zoom,           {0} },
     { ClkStatusText,        0,              Button2,        spawn,          {.v = termcmd } },
     { ClkClientWin,         MODKEY,         Button1,        movemouse,      {0} },
