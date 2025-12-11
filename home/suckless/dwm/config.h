@@ -77,13 +77,12 @@ static const int resizehints = 1;    /* 1 means respect size hints in tiled resi
 
 static const Layout layouts[] = {
     /* symbol     arrange function */
-    { "[Tile]",      tile },    /* first entry is default */
-    { "[Float]",      NULL },    /* no layout function means floating behavior */
-    { "[Mono]",      monocle },
-    { "[Grid]",      grid },
-    { "[Spiral]",      spiral },
-    { "[Dwindle]",     dwindle },
-    { "[BStack]",      bstack },
+    { " ",      tile },    /* first entry is default */
+    { "󰥛 ",      NULL },    /* no layout function means floating behavior */
+    { "󰝤 ",      monocle },
+    { "󱗼",      grid },
+    { " ",      spiral },
+    { " ",      bstack },
 };
 
 /* key definitions */
@@ -101,36 +100,26 @@ static const Layout layouts[] = {
 static char dmenumon[2]              = "0"; /* component of dmenucmd, manipulated in spawn() */
 static const char *dmenucmd[]        = { "dmenu_run", "-p", ">", "-m", dmenumon, "-fn", dmenufont, "-sb", col_primary_bg};
 static const char *termcmd[]         = { "/usr/bin/alacritty", NULL };
-static const char *web[]             = { "/usr/bin/microsoft-edge", NULL };
-static const char *torrentcli[]      = { "t", "alacritty", "-t", "tremc" , "-e", "tremc", NULL};
-static const char *fileManager[]     = { "n", "/usr/bin/thunar", NULL };
-static const char *colorChooser[]    = { "c", "/usr/bin/kcolorchooser", NULL };
+static const char *webcmd[]             = { "/usr/bin/microsoft-edge", NULL };
+static const char *torrentclicmd[]      = { "t", "alacritty", "-t", "tremc" , "-e", "tremc", NULL};
+static const char *filemanagercmd[]     = { "n", "/usr/bin/thunar", NULL };
+static const char *colorchoosercmd[]    = { "c", "/usr/bin/kcolorchooser", NULL };
 static const char *scratchpadcmd[]   = { "s", "/usr/bin/alacritty", "-t", "scratchpad" , "-e", "bash", "scratchtmux", NULL};
-static const char *ideascmd[]        = { "i", "/usr/bin/alacritty", "-t", "Ideas" , "-e", "nvim", "/random/notes/thots/🥷 Tech Ideas/Ideas.md.md", NULL};
 static const char *gompcmd[]         = { "y", "/usr/bin/alacritty" , "-t", "gomp" , "--config-file", gspt_config, "-e", "/H/code/gomp/gomp", NULL};
-static const char *gsptcmd[]         = { "g", "/usr/bin/alacritty" , "-t", "gspt" , "--config-file", gspt_config, "-e", "/H/code/gspt/gspt", NULL};
 
 static Key keys[] = {
    /* modifier                               key                          function        argument */
   { MODKEY,                                 XK_p,                        spawn,                 {.v = dmenucmd } },
-  { MODKEY,                                 XK_u,                        spawn,                 {.v = web} },
-  { Mod1Mask,                               XK_u,                        spawn,                 SHCMD("bdm") },
+  { MODKEY,                                 XK_u,                        spawn,                 {.v = webcmd} },
   { MODKEY,                                 XK_Return,                   spawn,                 {.v = termcmd } },
-  { MODKEY|ShiftMask,                       XK_Return,                   spawn,                 SHCMD("alacritty -e tmux") },
   { MODKEY,                                 XK_space,                    togglescratch,         {.v = scratchpadcmd } },
-  { Mod1Mask,                               XK_y,                        togglescratch,         {.v = gsptcmd } },
   { MODKEY,                                 XK_y,                        togglescratch,         {.v = gompcmd } },
-  { MODKEY,                                 XK_e,                        togglescratch,         {.v = fileManager } },
-  { MODKEY,                                 XK_q,                        togglescratch,         {.v = torrentcli } },
-  { MODKEY|ControlMask|ShiftMask,           XK_c,                        togglescratch,         {.v = colorChooser } },
-  { MODKEY|ShiftMask,                       XK_o,                        togglescratch,         {.v = ideascmd } },
-  { MODKEY,                                 XK_o,                        spawn,                 SHCMD("todo") },
-  { Mod1Mask,                               XK_q,                        spawn,                 SHCMD("torrentInfo") },
-  { MODKEY|ShiftMask,                       XK_y,                        spawn,                 SHCMD("spotify") },
-  { MODKEY|ShiftMask,                       XK_p,                        spawn,                 SHCMD("openPDF") },
+  { MODKEY,                                 XK_e,                        togglescratch,         {.v = filemanagercmd } },
+  { MODKEY,                                 XK_q,                        togglescratch,         {.v = torrentclicmd } },
+  { MODKEY|ControlMask|ShiftMask,           XK_c,                        togglescratch,         {.v = colorchoosercmd } },
+  { Mod1Mask,                               XK_u,                        spawn,                 SHCMD("bdm") },
   { Mod1Mask,                               XK_F4,                       spawn,                 SHCMD("sd") },
   { 0,                                      XK_Print,                    spawn,                 SHCMD("screenshot") },
-  { ControlMask,                            XK_Print,                    spawn,                 SHCMD("directoryName") },
   { ShiftMask,                              XK_Print,                    spawn,                 SHCMD("screenshot part") },
   { 0,                                      XF86XK_AudioPrev,            spawn,                 SHCMD("mpc prev")},
   { 0,                                      XF86XK_AudioNext,            spawn,                 SHCMD("mpc next")},
@@ -138,19 +127,18 @@ static Key keys[] = {
   { 0,                                      XF86XK_AudioStop,            spawn,                 SHCMD("mpc stop")},
   { 0,                                      XF86XK_AudioLowerVolume,     spawn,                 SHCMD("pamixer -d 5")},
   { 0,                                      XF86XK_AudioRaiseVolume,     spawn,                 SHCMD("pamixer -i 5")},
-  { MODKEY|ShiftMask,                       XK_F5,                       spawn,                 SHCMD("reloadKeys")},
-  { MODKEY|ShiftMask,                       XK_F6,                       spawn,                 SHCMD("sxiv /D/Downloads/wallpapers/*.jpg")},
   { MODKEY,                                 XK_F10,                      spawn,                 SHCMD("xbacklight -inc 10")},
   { MODKEY,                                 XK_F9,                       spawn,                 SHCMD("xbacklight -dec 10")},
   { 0,                                      XF86XK_MonBrightnessUp,      spawn,                 SHCMD("xbacklight -inc 10")},
   { 0,                                      XF86XK_MonBrightnessDown,    spawn,                 SHCMD("xbacklight -dec 10")},
-  { MODKEY|ShiftMask,                       XK_e,                        spawn,                 SHCMD("getEmoji")},
+  { MODKEY|ShiftMask,                       XK_F5,                       spawn,                 SHCMD("reloadKeys")},
   { MODKEY,                                 XK_v,                        spawn,                 SHCMD("copyq menu")},
+  { MODKEY,                                 XK_t,                        setlayout,             {.v = &layouts[0]} },
+  { MODKEY,                                 XK_m,                        setlayout,             {.v = &layouts[2]} },
   { MODKEY,                                 XK_g,                        setlayout,             {.v = &layouts[3]} },
-  { MODKEY,                                 XK_r,                        setlayout,             {.v = &layouts[4]} },
-  { MODKEY|ShiftMask,                       XK_r,                        setlayout,             {.v = &layouts[5]} },
-  { MODKEY,                                 XK_z,                        spawn,                 SHCMD("unzipFiles")},
-  { MODKEY,                                 XK_b,                        togglebar,             {0} },
+  { MODKEY,                                 XK_s,                        setlayout,             {.v = &layouts[4]} },
+  { MODKEY,                                 XK_b,                        setlayout,             {.v = &layouts[5]} },
+  { Mod1Mask,                               XK_b,                        togglebar,             {0} },
   { MODKEY,                                 XK_j,                        focusstackvis,         {.i = +1 } },
   { MODKEY,                                 XK_k,                        focusstackvis,         {.i = -1 } },
   { MODKEY|ShiftMask,                       XK_j,                        focusstackhid,         {.i = +1 } },
@@ -162,8 +150,6 @@ static Key keys[] = {
   { MODKEY,                                 XK_Tab,                      view,                  {0} },
   { MODKEY|ShiftMask,                       XK_c,                        killclient,            {0} },
   { MODKEY,                                 XK_c,                        killclient,            {0} },
-  { MODKEY,                                 XK_t,                        setlayout,             {.v = &layouts[0]} },
-  { MODKEY|ShiftMask,                       XK_m,                        setlayout,             {.v = &layouts[2]} },
   { MODKEY,                                 XK_f,                        togglefullscr,         {0} },
   { MODKEY,                                 XK_m,                        zoom,                  {0} },
   { MODKEY,                                 XK_0,                        view,                  {.ui = ~0 } },
@@ -175,10 +161,9 @@ static Key keys[] = {
   { MODKEY,                                 XK_minus,                    setgaps,               {.i = -1 } },
   { MODKEY,                                 XK_equal,                    setgaps,               {.i = +1 } },
   { MODKEY|ShiftMask,                       XK_equal,                    setgaps,               {.i = 0  } },
-  { MODKEY|ShiftMask,                       XK_u,                        setlayout,             {.v = &layouts[6]} },
   { MODKEY|ShiftMask,                       XK_space,                    togglefloating,        {0} },
   { MODKEY,                                 XK_s,                        show,                  {0} },
-  { MODKEY,                                 XK_t,                        hide,                  {0} },
+  { MODKEY,                                 XK_o,                        hide,                  {0} },
   TAGKEYS(                                  XK_1,                        0)
   TAGKEYS(                                  XK_2,                        1)
   TAGKEYS(                                  XK_3,                        2)

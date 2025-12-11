@@ -84,11 +84,6 @@ fibonacci(Monitor *mon, int s) {
 }
 
 void
-dwindle(Monitor *mon) {
-	fibonacci(mon, 1);
-}
-
-void
 spiral(Monitor *mon) {
 	fibonacci(mon, 0);
 }
