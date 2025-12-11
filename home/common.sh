@@ -15,6 +15,7 @@ Z_SH_LINK="https://raw.githubusercontent.com/rupa/z/master/z.sh"
 ! [[ -d "$VENV_DIR" ]] && mkdir "$VENV_DIR"
 ! [[ -d "$CODE_DIR" ]] && mkdir "$CODE_DIR"
 ! [[ -d "$NOTES_DIR" ]] && mkdir "$NOTES_DIR"
+! [[ -d "$STASH_DIR" ]] && mkdir "$STASH_DIR"
 
 # Node Version Manager
 export NVM_DIR="$HOME/.nvm"
@@ -236,6 +237,101 @@ sb() {
 	fi
 }
 
+stash() {
+	# Create stash directory if it doesn't exist
+	[[ ! -d "$STASH_DIR" ]] && mkdir -p "$STASH_DIR"
+
+	case "$1" in
+	"-l"|"list")
+		# List all stashed files with timestamps
+		if [[ -n "$(ls -A $STASH_DIR 2>/dev/null)" ]]; then
+			ls -lht "$STASH_DIR" | tail -n +2
+		else
+			echo "Stash is empty"
+		fi
+		;;
+	"-r"|"restore")
+		# Restore a specific file
+		if [[ -n "$2" ]]; then
+			local filename=$(basename "$2")
+			if [[ -f "$STASH_DIR/$filename" ]]; then
+				cp "$STASH_DIR/$filename" ./"$filename"
+				echo "Restored: $filename"
+			else
+				echo "File not found in stash: $filename"
+				return 1
+			fi
+		else
+			echo "Usage: stash -r <filename>"
+			return 1
+		fi
+		;;
+	"-f")
+		# Fuzzy find and restore a stashed file
+		local sel
+		sel="$(all_files "$STASH_DIR" | fzf_cmd)"
+		if [[ -n "$sel" ]]; then
+			local filename=$(basename "$sel")
+			cp "$sel" ./"$filename"
+			echo "Restored: $filename"
+		fi
+		;;
+	"-rm"|"remove")
+		# Remove a stashed file
+		if [[ -n "$2" ]]; then
+			local filename=$(basename "$2")
+			if [[ -f "$STASH_DIR/$filename" ]]; then
+				\rm -i "$STASH_DIR/$filename"
+			else
+				echo "File not found in stash: $filename"
+				return 1
+			fi
+		else
+			echo "Usage: stash -rm <filename>"
+			return 1
+		fi
+		;;
+	"-g")
+		# Go to stash directory
+		cd "$STASH_DIR"
+		;;
+	"-h"|"help"|"")
+		# Show help
+		cat << EOF
+Usage: stash [OPTION] [FILE]
+
+Stash files in a temporary directory for later use.
+
+Options:
+  <file>           Stash a file or directory
+  -l, list         List all stashed files
+  -r, restore      Restore a specific file to current directory
+  -f               Fuzzy find and restore a stashed file
+  -rm, remove      Remove a stashed file from stash
+  -g               Go to stash directory
+  -h, help         Show this help message
+
+Environment:
+  STASH_DIR        Stash directory location (default: ~/.stash)
+EOF
+		;;
+	*)
+		# Stash the specified file or directory
+		if [[ -e "$1" ]]; then
+			local filename=$(basename "$1")
+			local timestamp=$(date "+%Y%m%d_%H%M%S")
+			local target="$STASH_DIR/${filename}.${timestamp}"
+
+			cp -r "$1" "$target"
+			echo "Stashed: $filename -> $(basename $target)"
+		else
+			echo "File or directory not found: $1"
+			return 1
+		fi
+		;;
+	esac
+}
+
 #-(Bash Completion Functions)-------------------------------------------------
 
 # Completion for conf command
@@ -284,3 +380,19 @@ _note_completions() {
 	fi
 }
 complete -F _note_completions note
+
+# Completion for stash command
+_stash_completions() {
+	local cur="${COMP_WORDS[COMP_CWORD]}"
+	local prev="${COMP_WORDS[COMP_CWORD-1]}"
+	local STASH_DIR="${STASH_DIR:-$HOME/.stash}"
+
+	if [[ $COMP_CWORD -eq 1 ]]; then
+		COMPREPLY=($(compgen -W "-l list -r restore -f -rm remove -g -h help" -- "$cur"))
+	elif [[ $COMP_CWORD -eq 2 ]] && [[ "$prev" == "-r" || "$prev" == "restore" || "$prev" == "-rm" || "$prev" == "remove" ]]; then
+		if [[ -d "$STASH_DIR" ]]; then
+			COMPREPLY=($(compgen -W "$(\ls $STASH_DIR 2>/dev/null)" -- "$cur"))
+		fi
+	fi
+}
+complete -F _stash_completions stash
