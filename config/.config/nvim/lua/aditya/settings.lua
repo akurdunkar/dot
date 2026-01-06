@@ -31,7 +31,7 @@ vim.opt.termguicolors = true
 
 vim.cmd [[
     syntax enable
-    color sonokai
+    color vscode
     syntax on
 ]]
 
