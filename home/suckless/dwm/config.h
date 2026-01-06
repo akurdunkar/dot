@@ -28,7 +28,6 @@ static const char col_primary_bg[]         =   "#1c4289";
 static const char col_border[]             =   "#000000";
 static const char col_border_sel[]         =   "#1c4289";
 static const int BORDER_PX = 0;
-static const char gspt_config[]            =   "/home/aditya/.config/alacritty/gspt.toml";
 
 
 static const char *colors[][3]      = {
@@ -104,23 +103,15 @@ static const char *webcmd[]             = { "/usr/bin/microsoft-edge", NULL };
 static const char *torrentclicmd[]      = { "t", "alacritty", "-t", "tremc" , "-e", "tremc", NULL};
 static const char *filemanagercmd[]     = { "n", "/usr/bin/thunar", NULL };
 static const char *colorchoosercmd[]    = { "c", "/usr/bin/kcolorchooser", NULL };
-static const char *scratchpadcmd[]   = { "s", "/usr/bin/alacritty", "-t", "scratchpad" , "-e", "bash", "scratchtmux", NULL};
-static const char *gompcmd[]         = { "y", "/usr/bin/alacritty" , "-t", "gomp" , "--config-file", gspt_config, "-e", "/H/code/gomp/gomp", NULL};
 
 static Key keys[] = {
    /* modifier                               key                          function        argument */
   { MODKEY,                                 XK_p,                        spawn,                 {.v = dmenucmd } },
   { MODKEY,                                 XK_u,                        spawn,                 {.v = webcmd} },
   { MODKEY,                                 XK_Return,                   spawn,                 {.v = termcmd } },
-  { MODKEY,                                 XK_space,                    togglescratch,         {.v = scratchpadcmd } },
-  { MODKEY,                                 XK_y,                        togglescratch,         {.v = gompcmd } },
   { MODKEY,                                 XK_e,                        togglescratch,         {.v = filemanagercmd } },
   { MODKEY,                                 XK_q,                        togglescratch,         {.v = torrentclicmd } },
   { MODKEY|ControlMask|ShiftMask,           XK_c,                        togglescratch,         {.v = colorchoosercmd } },
-  { Mod1Mask,                               XK_u,                        spawn,                 SHCMD("bdm") },
-  { Mod1Mask,                               XK_F4,                       spawn,                 SHCMD("sd") },
-  { 0,                                      XK_Print,                    spawn,                 SHCMD("screenshot") },
-  { ShiftMask,                              XK_Print,                    spawn,                 SHCMD("screenshot part") },
   { 0,                                      XF86XK_AudioPrev,            spawn,                 SHCMD("mpc prev")},
   { 0,                                      XF86XK_AudioNext,            spawn,                 SHCMD("mpc next")},
   { 0,                                      XF86XK_AudioPlay,            spawn,                 SHCMD("mpc toggle")},
@@ -131,7 +122,7 @@ static Key keys[] = {
   { MODKEY,                                 XK_F9,                       spawn,                 SHCMD("xbacklight -dec 10")},
   { 0,                                      XF86XK_MonBrightnessUp,      spawn,                 SHCMD("xbacklight -inc 10")},
   { 0,                                      XF86XK_MonBrightnessDown,    spawn,                 SHCMD("xbacklight -dec 10")},
-  { MODKEY|ShiftMask,                       XK_F5,                       spawn,                 SHCMD("reloadKeys")},
+  { MODKEY|ShiftMask,                       XK_F5,                       spawn,                 SHCMD("reload_keys")},
   { MODKEY,                                 XK_v,                        spawn,                 SHCMD("copyq menu")},
   { MODKEY,                                 XK_t,                        setlayout,             {.v = &layouts[0]} },
   { MODKEY,                                 XK_m,                        setlayout,             {.v = &layouts[2]} },

@@ -1,3 +1,0 @@
-#!/bin/bash
-__sel="$(brow -q "title,url" -c | dmenu -i -l 10)"
-[[ "$__sel" =~ http.*$ ]] && echo "$BASH_REMATCH" | xargs -r -d '\n' brave

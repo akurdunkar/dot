@@ -1,7 +1,0 @@
-#!/bin/bash
-#
-
-IDEA_NOTE="/random/notes/thots/🥷 Tech Ideas/Ideas.md.md"
-
-grep -Fxq "$(date '+%a %d %b, %Y')" "$IDEA_NOTE" || printf "\n$(date '+%a %d %b, %Y')\n----------------------------------" >> "$IDEA_NOTE"
-# grep -Fxq "$(date '+%a %d %b, %Y')" $HOME/ideas || printf "\n$(date '+%a %d %b, %Y')" >>  ~/ideas

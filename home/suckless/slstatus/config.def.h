@@ -67,9 +67,9 @@ static const struct arg args[] = {
     /* function format          argument */
     /* {netspeed_rx, " ^c#14ff72^  ^c#cbffc5^ %s", "wlp2s0"}, */
     /* {netspeed_tx, " ^c#4687ff^  ^c#aee5ff^ %s", "wlp2s0"}, */
-    {run_command, " %s", "networkSpeed"},
-    {run_command, " %s", "mpcM"},
-    {run_command, " %s", "getDate"},
-    {run_command, " %s", "battery.sh"},
-    {run_command, " %s", "volume.sh"},
+    {run_command, " %s", "get_network_speed"},
+    {run_command, " %s", "get_curr_song"},
+    {run_command, " %s", "get_date"},
+    {run_command, " %s", "get_battery"},
+    {run_command, " %s", "get_volume"},
 };
