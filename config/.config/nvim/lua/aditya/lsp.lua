@@ -59,6 +59,46 @@ capabilities.textDocument.completion.completionItem.snippetSupport = true
 
 local sdk_path = tostring(vim.fn.getenv("OBMC_SDK_PATH"))
 
+local function get_exported_envs(filepath)
+    local env = {}
+
+    local file = io.open(vim.fn.expand(filepath), "r")
+    if not file then
+        return env
+    end
+
+    -- Start with Neovim's current environment and update as we go
+    local base_env = vim.deepcopy(vim.env)
+
+    for line in file:lines() do
+        line = line:match("^%s*(.-)%s*$")
+
+        -- Skip empty lines and comments
+        if line ~= "" and not line:match("^#") then
+            -- Match: export VAR=VALUE
+            local key, raw = line:match("^export%s+([%w_]+)%s*=%s*(.+)$")
+
+            if key and raw then
+                -- Remove surrounding quotes
+                raw = raw:gsub("^(['\"])(.*)%1$", "%2")
+
+                -- Expand $VARS using already-parsed vars or existing env
+                local function expand_var(var)
+                    return env[var] or base_env[var] or ""
+                end
+
+                local value = raw:gsub("%$(%w+)", expand_var)
+
+                env[key] = value
+                base_env[key] = value
+            end
+        end
+    end
+
+    file:close()
+    return env
+end
+
 local server_specific_configuration = {
     yamlls = {
         settings = {
@@ -89,7 +129,8 @@ local server_specific_configuration = {
             "clangd",
             "--query-driver=" ..
             sdk_path .. "/sysroots/x86_64-oesdk-linux/usr/bin/arm-openbmc-linux-gnueabi/arm-openbmc-linux-gnueabi-g++"
-        }
+        },
+        cmd_env = get_exported_envs(sdk_path .. "/environment-setup-armv7ahf-vfpv4d16-openbmc-linux-gnueabi"),
     }
 }
 
