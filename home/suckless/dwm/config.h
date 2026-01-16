@@ -20,7 +20,6 @@ static const int DFH                       =   600;
 static const int DFX                       =   550;
 static const int DFY                       =   250;
 static const char *fonts[]                 =   { "Ubuntu Mono Nerd Font:size=12:style=Normal" };
-static const char dmenufont[]              =   "Ubuntu Mono Nerd Font:size=12:style=Normal";
 static const char col_statusbar_fg[]       =   "#ffffff";
 static const char col_statusbar_bg[]       =   "#000000";
 static const char col_primary_fg[]         =   "#ffffff";
@@ -96,8 +95,6 @@ static const Layout layouts[] = {
 #define SHCMD(cmd) { .v = (const char*[]){ "/bin/bash", "-c", cmd, NULL } }
 
 /* commands */
-static char dmenumon[2]              = "0"; /* component of dmenucmd, manipulated in spawn() */
-static const char *dmenucmd[]        = { "dmenu_run", "-p", ">", "-m", dmenumon, "-fn", dmenufont, "-sb", col_primary_bg};
 static const char *termcmd[]         = { "/usr/bin/alacritty", NULL };
 static const char *webcmd[]             = { "/usr/bin/microsoft-edge", NULL };
 static const char *torrentclicmd[]      = { "t", "alacritty", "-t", "tremc" , "-e", "tremc", NULL};
@@ -106,7 +103,6 @@ static const char *colorchoosercmd[]    = { "c", "/usr/bin/kcolorchooser", NULL 
 
 static Key keys[] = {
    /* modifier                               key                          function        argument */
-  { MODKEY,                                 XK_p,                        spawn,                 {.v = dmenucmd } },
   { MODKEY,                                 XK_u,                        spawn,                 {.v = webcmd} },
   { MODKEY,                                 XK_Return,                   spawn,                 {.v = termcmd } },
   { MODKEY,                                 XK_e,                        togglescratch,         {.v = filemanagercmd } },
