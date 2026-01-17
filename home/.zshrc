@@ -61,34 +61,10 @@ zle -N zle-line-init
 echo -ne '\e[5 q' # Use beam shape cursor on startup.
 preexec() { echo -ne '\e[5 q' ;} # Use beam shape cursor for each new prompt.
 
-#-(Source Files)--------------------------------------------------------------
-__source__() {
-	local hostname=$(hostname)
-	local file="$HOME/$hostname/$1"
-
-	# Check if hostname-specific file exists
-	if [[ -f "$file" ]]; then
-		source "$HOME/$1" # Source common file first
-		source "$file"
-	else
-		echo "Unable to find priv files for $hostname.."
-	fi
-}
-
-__source__ ".env"
-__source__ ".alias"
-__source__ ".rc"
-
 #-----------------------------------------------------------------------------
 
 source $HOME/common.sh
 envm
-
-bh() {
-    setopt local_options BASH_REMATCH
-    __sel="$(brow -q "title,url" -c | fzf_cmd)"
-    [[ "$__sel" =~ http.*$ ]] && echo "$BASH_REMATCH" | xargs -r -d '\n' brave
-}
 
 # Prompt Starts---------------------------------------------------------------
 

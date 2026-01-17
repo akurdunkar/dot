@@ -2,6 +2,27 @@
 
 # Common functions and utilities that can be shared between bash and zsh
 
+#-(Source Files)--------------------------------------------------------------
+__source__() {
+	local hostname
+	hostname=$(hostname)
+	local file="$HOME/$hostname/$1"
+
+	# Check if hostname-specific file exists
+	if [[ -f "$file" ]]; then
+		# shellcheck source=/dev/null
+		source "$HOME/$1" # Source common file first
+		# shellcheck source=/dev/null
+		source "$file"
+	else
+		echo "Unable to find priv files for $hostname.."
+	fi
+}
+
+__source__ ".env"
+__source__ ".alias"
+__source__ ".rc"
+
 #-(Create files/folders that don't exist but are required )-------------------
 
 # Z script
@@ -20,17 +41,12 @@ fi
 ! [[ -d "$NOTES_DIR" ]] && mkdir "$NOTES_DIR"
 ! [[ -d "$STASH_DIR" ]] && mkdir "$STASH_DIR"
 
-# Node Version Manager
-export NVM_DIR="$HOME/.nvm"
 ! [[ -r "$NVM_DIR" ]] &&
 	curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash &&
 	nvm install node &&
 	nvm use node
 
 #-----------------------------------------------------------------------------
-
-_FZF_HEIGHT_=7
-_FZF_OPTIONS_="--border=none --info=hidden --color=dark --reverse --ansi"
 
 cmd_exists() {
 	command -v "$1" 1>/dev/null 2>/dev/null && return 0
@@ -46,32 +62,22 @@ fd_command() {
 FZF_DEFAULT_COMMAND="$(fd_command) --type f --strip-cwd-prefix"
 export FZF_DEFAULT_COMMAND
 
-__fzf_cmd() {
-	printf "fzf --height %s %s" "$_FZF_HEIGHT_" "$_FZF_OPTIONS_"
-}
-
-__rg_cmd() {
-	printf "rg --color=always --colors 'match:fg:white' --column --line-number --hidden --ignore-case --no-heading ."
-}
-
-__dmenu_cmd() {
-	printf "dmenu -i -f -l 10"
-}
-
-____wrapper() {
-	eval "$(eval "$1")"
-}
-
 fzf_cmd() {
-	____wrapper __fzf_cmd
+	local fzf_height
+	local fzf_opts
+
+	fzf_height=7
+	fzf_opts="--height $fzf_height --border=none --info=hidden --color=dark --reverse --ansi"
+
+	eval "fzf $fzf_opts"
 }
 
 rg_cmd() {
-	____wrapper __rg_cmd
+	rg --color=always --colors 'match:fg:white' --column --line-number --hidden --ignore-case --no-heading .
 }
 
 dmenu_cmd() {
-	____wrapper __dmenu_cmd
+	dmenu -i -f -l 10
 }
 
 fk() {
@@ -116,9 +122,9 @@ venv() {
 }
 
 tl() {
-	local _session
-	_session="$(tmux list-sessions | fzf_cmd | awk -F: '{print $1}')"
-	[[ "$_session" != "" ]] && tmux attach-session -t "$_session"
+	local session
+	session="$(tmux list-sessions | fzf_cmd | awk -F: '{print $1}')"
+	[[ "$session" != "" ]] && tmux attach-session -t "$session"
 }
 
 note() {
