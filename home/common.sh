@@ -7,9 +7,12 @@
 # Z script
 Z_SH_PATH="$HOME/z.sh"
 Z_SH_LINK="https://raw.githubusercontent.com/rupa/z/master/z.sh"
-! [[ -r "$Z_SH_PATH" ]] &&
-	wget "$Z_SH_LINK" -O "$Z_SH_PATH" ||
+if ! [[ -r "$Z_SH_PATH" ]]; then
+	wget "$Z_SH_LINK" -O "$Z_SH_PATH"
+else
+	# shellcheck source=/dev/null
 	source "$Z_SH_PATH"
+fi
 
 # Create directories that don't exist
 ! [[ -d "$VENV_DIR" ]] && mkdir "$VENV_DIR"
@@ -40,10 +43,11 @@ fd_command() {
 }
 
 # Setting fd as the default source for fzf (respects .gitignore)
-export FZF_DEFAULT_COMMAND="$(fd_command) --type f --strip-cwd-prefix"
+FZF_DEFAULT_COMMAND="$(fd_command) --type f --strip-cwd-prefix"
+export FZF_DEFAULT_COMMAND
 
 __fzf_cmd() {
-	printf "fzf --height $_FZF_HEIGHT_ $_FZF_OPTIONS_"
+	printf "fzf --height %s %s" "$_FZF_HEIGHT_" "$_FZF_OPTIONS_"
 }
 
 __rg_cmd() {
@@ -55,7 +59,7 @@ __dmenu_cmd() {
 }
 
 ____wrapper() {
-	eval "$(eval $1)"
+	eval "$(eval "$1")"
 }
 
 fzf_cmd() {
@@ -72,50 +76,63 @@ dmenu_cmd() {
 
 fk() {
 	[[ $1 == "" ]] && return 1
-	ps aux | \grep $1 | fzf_cmd | awk '{print $2}' | xargs -r kill
+	pgrep -f "$1" | fzf_cmd | xargs -r kill
 }
 
 venv() {
 	case "$1" in
 	"new")
-		[[ "$2" != "" ]] && virtualenv "$VENV_DIR/$2" &&
-			source "$VENV_DIR/$2/bin/activate" ||
+		if [[ "$2" != "" ]]; then
+			virtualenv "$VENV_DIR/$2" && {
+				# shellcheck source=/dev/null
+				source "$VENV_DIR/$2/bin/activate"
+			}
+		else
 			echo "Empty Name Provided!"
+		fi
 		;;
 	"remove")
-		[[ "$2" != "" ]] && \rm -rf "$VENV_DIR/$2" &&
-			echo "Removed $2 Succesfully!" ||
+		if [[ "$2" != "" ]]; then
+			\rm -rf "${VENV_DIR:?}/$2" &&
+				echo "Removed $2 Succesfully!"
+		else
 			echo "Empty Name Provided!"
+		fi
 		command -v deactivate && deactivate
 		;;
 	"-f")
 		local sel
 		sel="$(find "$VENV_DIR" -maxdepth 1 -mindepth 1 -type d | fzf_cmd)"
-		[[ "$sel" != "" ]] && source "$sel/bin/activate"
+		if [[ "$sel" != "" ]]; then
+			# shellcheck source=/dev/null
+			source "$sel/bin/activate"
+		fi
 		;;
 	"source")
+		# shellcheck source=/dev/null
 		source "$VENV_DIR/$2/bin/activate"
 		;;
 	esac
 }
 
 tl() {
-	local _session="$(tmux list-sessions | fzf_cmd | awk -F: '{print $1}')"
-	[[ "$_session" != "" ]] && tmux attach-session -t $_session
+	local _session
+	_session="$(tmux list-sessions | fzf_cmd | awk -F: '{print $1}')"
+	[[ "$_session" != "" ]] && tmux attach-session -t "$_session"
 }
 
 note() {
 	if [[ "$1" == "-d" ]]; then
-		nvim $NOTES_DIR/$(date "+%a_%d_%b.md")
+		"$EDITOR" "$NOTES_DIR/$(date "+%a_%d_%b.md")"
 	elif [[ "$1" == "-f" ]]; then
-		all_files $NOTES_DIR | fzf_cmd | xargs -r -d '\n' $EDITOR
+		all_files "$NOTES_DIR" | fzf_cmd | xargs -r -d '\n' "$EDITOR"
 	elif [[ "$1" == "-g" ]]; then
-		cd $NOTES_DIR
+		cd "$NOTES_DIR" || return
 	elif [[ "$1" != "" ]]; then
 		if [[ "$1" != *.md ]]; then
-			nvim "$NOTES_DIR/$1.md"
+			"$EDITOR" "$NOTES_DIR/$1.md"
 		else
-			nvim "$NOTES_DIR/$1"
+			"$EDITOR" "$NOTES_DIR/$1"
 		fi
 	fi
 }
@@ -123,13 +140,13 @@ note() {
 sc() {
 	if [[ "$1" == "-m" ]]; then
 		fileName=$2
-		echo "#!/bin/sh" >$HOME/scripts/$fileName &&
-			chmod +x $HOME/scripts/$fileName &&
-			nvim $HOME/scripts/$fileName
+		echo "#!/bin/sh" >"$HOME/scripts/$fileName" &&
+			chmod +x "$HOME/scripts/$fileName" &&
+			"$EDITOR" "$HOME/scripts/$fileName"
 	elif [[ "$1" == "-g" ]]; then
-		cd $HOME/scripts/
+		cd "$HOME/scripts/" || return
 	else
-		all_files $HOME/scripts | fzf_cmd | xargs -r -d '\n' $EDITOR
+		all_files "$HOME/scripts" | fzf_cmd | xargs -r -d '\n' "$EDITOR"
 	fi
 }
 
@@ -138,7 +155,8 @@ lzf() {
 }
 
 fg() {
-	local selection=$(rg_cmd | fzf_cmd | head -n1)
+	local selection
+	selection=$(rg_cmd | fzf_cmd | head -n1)
 	if [[ -n "$selection" ]]; then
 		# Expected format: filename:line:optional_text
 		file=$(echo "$selection" | cut -d':' -f1)
@@ -149,77 +167,84 @@ fg() {
 			line=1
 		fi
 
-		# Open file in nvim at the line number
-		nvim "$file" +$line
+		# Open file in "$EDITOR" at the line number
+		"$EDITOR" "$file" +"$line"
 	fi
 }
 
 cco() {
 	if [[ "$1" == "-m" ]]; then
-		printf "Making Directory $2\n"
+		printf "Making Directory %s\n" "$2"
 		mkdir "$CODE_DIR/$2"
-		printf "Changing Directory to $2\n"
-		cd "$CODE_DIR/$2"
+		printf "Changing Directory to %s\n" "$2"
+		cd "$CODE_DIR/$2" || return
 	elif [[ "$1" == "-f" ]]; then
-		dir=$(ls $CODE_DIR/ | fzf_cmd)
-		cd "$CODE_DIR/$dir"
+		dir=$(find "$CODE_DIR" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' | fzf_cmd)
+		cd "$CODE_DIR/$dir" || return
 	elif [[ "$1" == "-rm" || "$1" == "rm" ]]; then
-		\rm -ivr "$CODE_DIR/$2"
+		\rm -ivr "${CODE_DIR:?}/$2"
 	elif [[ "$1" == "-c" ]]; then
-		cd $CODE_DIR/$2
+		cd "$CODE_DIR/$2" || return
 	else
 		f="$1"
 		shift 1>/dev/null 2>/dev/null
-		z $CODE_DIR/$f $@
+		z "$CODE_DIR/$f" "$@"
 	fi
 }
 
 ez() {
-	local file="$(cat $HOME/.zshrc -n | fzf_cmd)"
-	[[ "$file" != "" ]] && (
-		local line_nr="$(awk '{print $1}' <<<"$file")"
-		nvim -c "$(printf "normal %sGzz" $line_nr)" $HOME/.zshrc
-	)
+	local file
+	file="$(cat "$HOME/.zshrc" -n | fzf_cmd)"
+	if [[ "$file" != "" ]]; then
+		local line_nr
+		line_nr="$(awk '{print $1}' <<<"$file")"
+		"$EDITOR" -c "$(printf "normal %sGzz" "$line_nr")" "$HOME/.zshrc"
+	fi
 }
 
 fs() {
-	fzf_cmd | xargs -r -d '\n' $EDITOR
+	fzf_cmd | xargs -r -d '\n' "$EDITOR"
 }
 
 all_files() {
-	$(printf "$(fd_command) . $1")
+	local fd_cmd
+	fd_cmd=$(fd_command)
+	eval "$fd_cmd . $1"
 }
 
 conf() {
 	local dir="NOT SET"
+	local GO_TO_DIR=0
 	# Args
 	for i in "$@"; do
 		if [[ "$i" == "-g" ]]; then
-			local GO_TO_DIR=1
+			GO_TO_DIR=1
 		else
-			local dir="$i"
+			dir="$i"
 		fi
 	done
 
 	# Dir
 	if [[ "$dir" == "NOT SET" ]]; then
-		local dir=$(ls $HOME/.config/ | fzf_cmd)
+		dir=$(find "$HOME/.config" -maxdepth 1 -mindepth 1 -printf '%f\n' | fzf_cmd)
 	fi
 
 	if [[ "$GO_TO_DIR" == "1" ]]; then
-		cd $HOME/.config/$dir
+		cd "$HOME/.config/$dir" || return
 	else
-		nvim $HOME/.config/$dir
+		"$EDITOR" "$HOME/.config/$dir"
 	fi
 }
 
 fn() {
-	all_files "$HOME/.config/nvim/" | fzf_cmd | xargs -r -d '\n' $EDITOR
+	all_files "$HOME/.config/nvim/" | fzf_cmd | xargs -r -d '\n' "$EDITOR"
 }
 
 envm() {
 	# Node Version Manager
-	[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"                   # This loads nvm
+	# shellcheck source=/dev/null
+	[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" # This loads nvm
+	# shellcheck source=/dev/null
 	[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion" # This loads nvm bash_completion
 }
 
@@ -231,9 +256,11 @@ epyenv() {
 
 sb() {
 	if [[ -n "$ZSH_VERSION" ]]; then
-		source ~/.zshrc
+		# shellcheck source=/dev/null
+		source "$HOME/.zshrc"
 	elif [[ -n "$BASH_VERSION" ]]; then
-		source ~/.bashrc
+		# shellcheck source=/dev/null
+		source "$HOME/.bashrc"
 	fi
 }
 
@@ -242,18 +269,19 @@ stash() {
 	[[ ! -d "$STASH_DIR" ]] && mkdir -p "$STASH_DIR"
 
 	case "$1" in
-	"-l"|"list")
+	"-l" | "list")
 		# List all stashed files with timestamps
-		if [[ -n "$(ls -A $STASH_DIR 2>/dev/null)" ]]; then
-			ls -lht "$STASH_DIR" | tail -n +2
+		if [[ -n "$(ls -A "$STASH_DIR" 2>/dev/null)" ]]; then
+			find "$STASH_DIR" -maxdepth 1 -type f -printf '%T@ %p\n' | sort -rn | cut -d' ' -f2- | xargs -I {} ls -lh {}
 		else
 			echo "Stash is empty"
 		fi
 		;;
-	"-r"|"restore")
+	"-r" | "restore")
 		# Restore a specific file
 		if [[ -n "$2" ]]; then
-			local filename=$(basename "$2")
+			local filename
+			filename=$(basename "$2")
 			if [[ -f "$STASH_DIR/$filename" ]]; then
 				cp "$STASH_DIR/$filename" ./"$filename"
 				echo "Restored: $filename"
@@ -271,15 +299,17 @@ stash() {
 		local sel
 		sel="$(all_files "$STASH_DIR" | fzf_cmd)"
 		if [[ -n "$sel" ]]; then
-			local filename=$(basename "$sel")
+			local filename
+			filename=$(basename "$sel")
 			cp "$sel" ./"$filename"
 			echo "Restored: $filename"
 		fi
 		;;
-	"-rm"|"remove")
+	"-rm" | "remove")
 		# Remove a stashed file
 		if [[ -n "$2" ]]; then
-			local filename=$(basename "$2")
+			local filename
+			filename=$(basename "$2")
 			if [[ -f "$STASH_DIR/$filename" ]]; then
 				\rm -i "$STASH_DIR/$filename"
 			else
@@ -293,11 +323,11 @@ stash() {
 		;;
 	"-g")
 		# Go to stash directory
-		cd "$STASH_DIR"
+		cd "$STASH_DIR" || return
 		;;
-	"-h"|"help"|"")
+	"-h" | "help" | "")
 		# Show help
-		cat << EOF
+		cat <<EOF
 Usage: stash [OPTION] [FILE]
 
 Stash files in a temporary directory for later use.
@@ -312,18 +342,21 @@ Options:
   -h, help         Show this help message
 
 Environment:
-  STASH_DIR        Stash directory location (default: ~/.stash)
+  STASH_DIR        Stash directory location (default: $HOME/.stash)
 EOF
 		;;
 	*)
 		# Stash the specified file or directory
 		if [[ -e "$1" ]]; then
-			local filename=$(basename "$1")
-			local timestamp=$(date "+%Y%m%d_%H%M%S")
-			local target="$STASH_DIR/${filename}.${timestamp}"
+			local filename
+			local timestamp
+			local target
+			filename=$(basename "$1")
+			timestamp=$(date "+%Y%m%d_%H%M%S")
+			target="$STASH_DIR/${filename}.${timestamp}"
 
 			cp -r "$1" "$target"
-			echo "Stashed: $filename -> $(basename $target)"
+			echo "Stashed: $filename -> $(basename "$target")"
 		else
 			echo "File or directory not found: $1"
 			return 1
@@ -337,10 +370,11 @@ EOF
 # Completion for conf command
 _conf_completions() {
 	local cur="${COMP_WORDS[COMP_CWORD]}"
-	local prev="${COMP_WORDS[COMP_CWORD-1]}"
+	local prev="${COMP_WORDS[COMP_CWORD - 1]}"
 
 	if [[ -d "$HOME/.config" ]]; then
-		COMPREPLY=($(compgen -W "$(\ls $HOME/.config 2>/dev/null)" -- "$cur"))
+		local IFS=$'\n'
+		mapfile -t COMPREPLY < <(compgen -W "$(find "$HOME/.config" -maxdepth 1 -mindepth 1 -printf '%f\n' 2>/dev/null)" -- "$cur")
 	fi
 }
 complete -F _conf_completions conf
@@ -348,12 +382,14 @@ complete -F _conf_completions conf
 # Completion for venv command
 _venv_completions() {
 	local cur="${COMP_WORDS[COMP_CWORD]}"
-	local prev="${COMP_WORDS[COMP_CWORD-1]}"
+	local prev="${COMP_WORDS[COMP_CWORD - 1]}"
 
 	if [[ $COMP_CWORD -eq 1 ]]; then
-		COMPREPLY=($(compgen -W "new remove source -f" -- "$cur"))
+		local IFS=$' \t\n'
+		mapfile -t COMPREPLY < <(compgen -W "new remove source -f" -- "$cur")
 	elif [[ $COMP_CWORD -eq 2 ]] && [[ -d "$VENV_DIR" ]]; then
-		COMPREPLY=($(compgen -W "$(\ls $VENV_DIR 2>/dev/null)" -- "$cur"))
+		local IFS=$'\n'
+		mapfile -t COMPREPLY < <(compgen -W "$(find "$VENV_DIR" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' 2>/dev/null)" -- "$cur")
 	fi
 }
 complete -F _venv_completions venv
@@ -361,10 +397,11 @@ complete -F _venv_completions venv
 # Completion for cco command
 _cco_completions() {
 	local cur="${COMP_WORDS[COMP_CWORD]}"
-	local prev="${COMP_WORDS[COMP_CWORD-1]}"
+	local prev="${COMP_WORDS[COMP_CWORD - 1]}"
 
 	if [[ -d "$CODE_DIR" ]]; then
-		COMPREPLY=($(compgen -W "$(\ls $CODE_DIR 2>/dev/null)" -- "$cur"))
+		local IFS=$'\n'
+		mapfile -t COMPREPLY < <(compgen -W "$(find "$CODE_DIR" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' 2>/dev/null)" -- "$cur")
 	fi
 }
 complete -F _cco_completions cco
@@ -372,11 +409,13 @@ complete -F _cco_completions cco
 # Completion for note command
 _note_completions() {
 	local cur="${COMP_WORDS[COMP_CWORD]}"
-	local prev="${COMP_WORDS[COMP_CWORD-1]}"
+	local prev="${COMP_WORDS[COMP_CWORD - 1]}"
 
 	if [[ $COMP_CWORD -eq 1 ]] && [[ -d "$NOTES_DIR" ]]; then
-		local notes=$(\ls $NOTES_DIR/*.md 2>/dev/null | awk -F/ '{print $NF}')
-		COMPREPLY=($(compgen -W "$notes" -- "$cur"))
+		local notes
+		notes=$(find "$NOTES_DIR" -maxdepth 1 -name "*.md" -printf '%f\n' 2>/dev/null)
+		local IFS=$'\n'
+		mapfile -t COMPREPLY < <(compgen -W "$notes" -- "$cur")
 	fi
 }
 complete -F _note_completions note
@@ -384,14 +423,16 @@ complete -F _note_completions note
 # Completion for stash command
 _stash_completions() {
 	local cur="${COMP_WORDS[COMP_CWORD]}"
-	local prev="${COMP_WORDS[COMP_CWORD-1]}"
+	local prev="${COMP_WORDS[COMP_CWORD - 1]}"
 	local STASH_DIR="${STASH_DIR:-$HOME/.stash}"
 
 	if [[ $COMP_CWORD -eq 1 ]]; then
-		COMPREPLY=($(compgen -W "-l list -r restore -f -rm remove -g -h help" -- "$cur"))
+		local IFS=$' \t\n'
+		mapfile -t COMPREPLY < <(compgen -W "-l list -r restore -f -rm remove -g -h help" -- "$cur")
 	elif [[ $COMP_CWORD -eq 2 ]] && [[ "$prev" == "-r" || "$prev" == "restore" || "$prev" == "-rm" || "$prev" == "remove" ]]; then
 		if [[ -d "$STASH_DIR" ]]; then
-			COMPREPLY=($(compgen -W "$(\ls $STASH_DIR 2>/dev/null)" -- "$cur"))
+			local IFS=$'\n'
+			mapfile -t COMPREPLY < <(compgen -W "$(find "$STASH_DIR" -maxdepth 1 -type f -printf '%f\n' 2>/dev/null)" -- "$cur")
 		fi
 	fi
 }
