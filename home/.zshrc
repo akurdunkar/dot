@@ -75,9 +75,9 @@ __source__() {
 	fi
 }
 
-__source__ env.sh
-__source__ alias.sh
-__source__ rc
+__source__ ".env"
+__source__ ".alias"
+__source__ ".rc"
 
 #-----------------------------------------------------------------------------
 
