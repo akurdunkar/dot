@@ -143,23 +143,6 @@ note() {
 	fi
 }
 
-sc() {
-	if [[ "$1" == "-m" ]]; then
-		fileName=$2
-		echo "#!/bin/sh" >"$HOME/scripts/$fileName" &&
-			chmod +x "$HOME/scripts/$fileName" &&
-			"$EDITOR" "$HOME/scripts/$fileName"
-	elif [[ "$1" == "-g" ]]; then
-		cd "$HOME/scripts/" || return
-	else
-		all_files "$HOME/scripts" | fzf_cmd | xargs -r -d '\n' "$EDITOR"
-	fi
-}
-
-lzf() {
-	locate "$1" | fzf_cmd
-}
-
 fg() {
 	local selection
 	selection=$(rg_cmd | fzf_cmd | head -n1)
@@ -195,16 +178,6 @@ cco() {
 		f="$1"
 		shift 1>/dev/null 2>/dev/null
 		z "$CODE_DIR/$f" "$@"
-	fi
-}
-
-ez() {
-	local file
-	file="$(cat "$HOME/.zshrc" -n | fzf_cmd)"
-	if [[ "$file" != "" ]]; then
-		local line_nr
-		line_nr="$(awk '{print $1}' <<<"$file")"
-		"$EDITOR" -c "$(printf "normal %sGzz" "$line_nr")" "$HOME/.zshrc"
 	fi
 }
 
@@ -371,75 +344,4 @@ EOF
 	esac
 }
 
-#-(Bash Completion Functions)-------------------------------------------------
-
-# Completion for conf command
-_conf_completions() {
-	local cur="${COMP_WORDS[COMP_CWORD]}"
-	local prev="${COMP_WORDS[COMP_CWORD - 1]}"
-
-	if [[ -d "$HOME/.config" ]]; then
-		local IFS=$'\n'
-		mapfile -t COMPREPLY < <(compgen -W "$(find "$HOME/.config" -maxdepth 1 -mindepth 1 -printf '%f\n' 2>/dev/null)" -- "$cur")
-	fi
-}
-complete -F _conf_completions conf
-
-# Completion for venv command
-_venv_completions() {
-	local cur="${COMP_WORDS[COMP_CWORD]}"
-	local prev="${COMP_WORDS[COMP_CWORD - 1]}"
-
-	if [[ $COMP_CWORD -eq 1 ]]; then
-		local IFS=$' \t\n'
-		mapfile -t COMPREPLY < <(compgen -W "new remove source -f" -- "$cur")
-	elif [[ $COMP_CWORD -eq 2 ]] && [[ -d "$VENV_DIR" ]]; then
-		local IFS=$'\n'
-		mapfile -t COMPREPLY < <(compgen -W "$(find "$VENV_DIR" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' 2>/dev/null)" -- "$cur")
-	fi
-}
-complete -F _venv_completions venv
-
-# Completion for cco command
-_cco_completions() {
-	local cur="${COMP_WORDS[COMP_CWORD]}"
-	local prev="${COMP_WORDS[COMP_CWORD - 1]}"
-
-	if [[ -d "$CODE_DIR" ]]; then
-		local IFS=$'\n'
-		mapfile -t COMPREPLY < <(compgen -W "$(find "$CODE_DIR" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' 2>/dev/null)" -- "$cur")
-	fi
-}
-complete -F _cco_completions cco
-
-# Completion for note command
-_note_completions() {
-	local cur="${COMP_WORDS[COMP_CWORD]}"
-	local prev="${COMP_WORDS[COMP_CWORD - 1]}"
-
-	if [[ $COMP_CWORD -eq 1 ]] && [[ -d "$NOTES_DIR" ]]; then
-		local notes
-		notes=$(find "$NOTES_DIR" -maxdepth 1 -name "*.md" -printf '%f\n' 2>/dev/null)
-		local IFS=$'\n'
-		mapfile -t COMPREPLY < <(compgen -W "$notes" -- "$cur")
-	fi
-}
-complete -F _note_completions note
-
-# Completion for stash command
-_stash_completions() {
-	local cur="${COMP_WORDS[COMP_CWORD]}"
-	local prev="${COMP_WORDS[COMP_CWORD - 1]}"
-	local STASH_DIR="${STASH_DIR:-$HOME/.stash}"
-
-	if [[ $COMP_CWORD -eq 1 ]]; then
-		local IFS=$' \t\n'
-		mapfile -t COMPREPLY < <(compgen -W "-l list -r restore -f -rm remove -g -h help" -- "$cur")
-	elif [[ $COMP_CWORD -eq 2 ]] && [[ "$prev" == "-r" || "$prev" == "restore" || "$prev" == "-rm" || "$prev" == "remove" ]]; then
-		if [[ -d "$STASH_DIR" ]]; then
-			local IFS=$'\n'
-			mapfile -t COMPREPLY < <(compgen -W "$(find "$STASH_DIR" -maxdepth 1 -type f -printf '%f\n' 2>/dev/null)" -- "$cur")
-		fi
-	fi
-}
-complete -F _stash_completions stash
+source $HOME/.completions
