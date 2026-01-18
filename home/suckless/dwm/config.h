@@ -1,5 +1,4 @@
 #include <X11/XF86keysym.h>
-#include "layouts.inc"
 
 /* appearance */
 
@@ -78,7 +77,7 @@ static const Layout layouts[] = {
     { " ",      tile },    /* first entry is default */
     { "󰥛 ",      NULL },    /* no layout function means floating behavior */
     { "󰝤 ",      monocle },
-    { "󱗼",      grid },
+    { "󱗼",       grid },
     { " ",      spiral },
     { " ",      bstack },
 };
