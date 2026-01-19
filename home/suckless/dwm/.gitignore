@@ -2,3 +2,6 @@
 *.orig
 *.rej
 dwm
+build
+.cache
+compile_commands.json
