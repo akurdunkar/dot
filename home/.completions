@@ -9,7 +9,7 @@ _conf_completions() {
 
 	if [[ -d "$HOME/.config" ]]; then
 		local IFS=$'\n'
-		mapfile -t COMPREPLY < <(compgen -W "$(find "$HOME/.config" -maxdepth 1 -mindepth 1 -printf '%f\n' 2>/dev/null)" -- "$cur")
+		COMPREPLY=($(compgen -W "$(find "$HOME/.config" -maxdepth 1 -mindepth 1 -printf '%f\n' 2>/dev/null)" -- "$cur"))
 	fi
 }
 complete -F _conf_completions conf
@@ -21,10 +21,10 @@ _venv_completions() {
 
 	if [[ $COMP_CWORD -eq 1 ]]; then
 		local IFS=$' \t\n'
-		mapfile -t COMPREPLY < <(compgen -W "new remove source -f" -- "$cur")
+		COMPREPLY=($(compgen -W "new remove source -f" -- "$cur"))
 	elif [[ $COMP_CWORD -eq 2 ]] && [[ -d "$VENV_DIR" ]]; then
 		local IFS=$'\n'
-		mapfile -t COMPREPLY < <(compgen -W "$(find "$VENV_DIR" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' 2>/dev/null)" -- "$cur")
+		COMPREPLY=($(compgen -W "$(find "$VENV_DIR" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' 2>/dev/null)" -- "$cur"))
 	fi
 }
 complete -F _venv_completions venv
@@ -36,7 +36,7 @@ _cco_completions() {
 
 	if [[ -d "$CODE_DIR" ]]; then
 		local IFS=$'\n'
-		mapfile -t COMPREPLY < <(compgen -W "$(find "$CODE_DIR" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' 2>/dev/null)" -- "$cur")
+		COMPREPLY=($(compgen -W "$(find "$CODE_DIR" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' 2>/dev/null)" -- "$cur"))
 	fi
 }
 complete -F _cco_completions cco
@@ -50,7 +50,7 @@ _note_completions() {
 		local notes
 		notes=$(find "$NOTES_DIR" -maxdepth 1 -name "*.md" -printf '%f\n' 2>/dev/null)
 		local IFS=$'\n'
-		mapfile -t COMPREPLY < <(compgen -W "$notes" -- "$cur")
+		COMPREPLY=($(compgen -W "$notes" -- "$cur"))
 	fi
 }
 complete -F _note_completions note
@@ -63,11 +63,11 @@ _stash_completions() {
 
 	if [[ $COMP_CWORD -eq 1 ]]; then
 		local IFS=$' \t\n'
-		mapfile -t COMPREPLY < <(compgen -W "-l list -r restore -f -rm remove -g -h help" -- "$cur")
+		COMPREPLY=($(compgen -W "-l list -r restore -f -rm remove -g -h help" -- "$cur"))
 	elif [[ $COMP_CWORD -eq 2 ]] && [[ "$prev" == "-r" || "$prev" == "restore" || "$prev" == "-rm" || "$prev" == "remove" ]]; then
 		if [[ -d "$STASH_DIR" ]]; then
 			local IFS=$'\n'
-			mapfile -t COMPREPLY < <(compgen -W "$(find "$STASH_DIR" -maxdepth 1 -type f -printf '%f\n' 2>/dev/null)" -- "$cur")
+			COMPREPLY=($(compgen -W "$(find "$STASH_DIR" -maxdepth 1 -type f -printf '%f\n' 2>/dev/null)" -- "$cur"))
 		fi
 	fi
 }
