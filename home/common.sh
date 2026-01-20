@@ -82,7 +82,7 @@ dmenu_cmd() {
 
 fk() {
 	[[ $1 == "" ]] && return 1
-	pgrep -f "$1" | fzf_cmd | xargs -r kill
+	pgrep -a "$1" | fzf_cmd | awk '{print $1}' | xargs -r kill
 }
 
 venv() {
