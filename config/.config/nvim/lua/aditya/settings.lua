@@ -1,4 +1,5 @@
 -- Globals
+
 vim.g["vscode_style"]                  = "dark"
 vim.g["color_coded_enabled "]          = 1
 vim.g["go_def_mapping_enabled"]        = false
@@ -8,6 +9,8 @@ vim.g["everforest_background"]         = 'hard'
 vim.g["everforest_better_performance"] = 1
 vim.g["sonokai_style"]                 = 'atlantis'
 vim.g["sonokai_better_performance"]    = 1
+
+-- WSL Interopt
 
 if vim.fn.has("wsl") == 1 then
     vim.cmd [[
@@ -26,18 +29,19 @@ if vim.fn.has("wsl") == 1 then
     ]]
 end
 
-vim.opt.background = "dark"
-vim.opt.termguicolors = true
+-- Colors
 
 vim.cmd [[
     syntax enable
-    color vscode
+    color darcula-solid
     syntax on
 ]]
 
-local COLUMNS = 80
--- vim.opt.colorcolumn=vim.fn.join(vim.fn.range(COLUMNS, 999),",")
-vim.opt.colorcolumn = { COLUMNS }
+-- Options
+
+vim.opt.background = "dark"
+vim.opt.termguicolors = true
+vim.opt.colorcolumn = { 80 }
 vim.opt.cmdheight = 1
 vim.opt.hidden = true       -- Required to keep multiple buffers open multiple buffers
 vim.opt.wrap = false
@@ -68,6 +72,7 @@ vim.opt.laststatus = 0
 vim.opt.mouse = "a"
 
 -- Highlights
+
 vim.cmd("hi DiagnosticVirtualTextError gui=italic guifg=#a84032")
 vim.cmd("hi DiagnosticVirtualTextInfo gui=italic guifg=#3277a8")
 vim.cmd("hi DiagnosticVirtualTextWarn gui=italic guifg=#d1cf47")
