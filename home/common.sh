@@ -67,13 +67,13 @@ fzf_cmd() {
 	local fzf_opts
 
 	fzf_height=7
-	fzf_opts="--height $fzf_height --border=none --info=hidden --color=dark --reverse --ansi"
+	fzf_opts="--height $fzf_height --border=none --info=hidden --color=light --reverse --ansi"
 
 	eval "fzf $fzf_opts"
 }
 
 rg_cmd() {
-	rg --color=always --colors 'match:fg:white' --column --line-number --hidden --ignore-case --no-heading .
+	rg --color=always --colors 'match:fg:black' --column --line-number --hidden --ignore-case --no-heading .
 }
 
 dmenu_cmd() {

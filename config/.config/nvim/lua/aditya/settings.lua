@@ -1,14 +1,9 @@
 -- Globals
 
-vim.g["vscode_style"]                  = "dark"
 vim.g["color_coded_enabled "]          = 1
 vim.g["go_def_mapping_enabled"]        = false
 vim.g["fzf_preview_window"]            = {}
-vim.g["fzf_layout"]                    = { down = '20%' }
-vim.g["everforest_background"]         = 'hard'
-vim.g["everforest_better_performance"] = 1
-vim.g["sonokai_style"]                 = 'atlantis'
-vim.g["sonokai_better_performance"]    = 1
+vim.g["fzf_layout"]                    = { down = '25%' }
 
 -- WSL Interopt
 
@@ -33,13 +28,13 @@ end
 
 vim.cmd [[
     syntax enable
-    color darcula-solid
+    color paper
     syntax on
 ]]
 
 -- Options
 
-vim.opt.background = "dark"
+-- vim.opt.background = "dark"
 vim.opt.termguicolors = true
 vim.opt.colorcolumn = { 80 }
 vim.opt.cmdheight = 1
@@ -78,9 +73,9 @@ vim.cmd("hi DiagnosticVirtualTextInfo gui=italic guifg=#3277a8")
 vim.cmd("hi DiagnosticVirtualTextWarn gui=italic guifg=#d1cf47")
 vim.cmd("hi DiagnosticVirtualTextOk gui=italic guifg=#3277a8")
 
-vim.cmd("hi Winbar guibg=None guifg=white")
+vim.cmd("hi Winbar guibg=None guifg=black")
 vim.cmd("hi WinbarNC guibg=None guifg=grey")
-vim.cmd("hi NonText guifg=grey")
+-- vim.cmd("hi NonText guifg=grey")
 
 -- vim.cmd("hi Normal guibg=black")
 -- vim.cmd("hi LineNr guibg=None")
