@@ -28,13 +28,13 @@ end
 
 vim.cmd [[
     syntax enable
-    color paper
+    color solarized
     syntax on
 ]]
 
 -- Options
 
--- vim.opt.background = "dark"
+vim.opt.background = "dark"
 vim.opt.termguicolors = true
 vim.opt.colorcolumn = { 80 }
 vim.opt.cmdheight = 1
@@ -73,7 +73,7 @@ vim.cmd("hi DiagnosticVirtualTextInfo gui=italic guifg=#3277a8")
 vim.cmd("hi DiagnosticVirtualTextWarn gui=italic guifg=#d1cf47")
 vim.cmd("hi DiagnosticVirtualTextOk gui=italic guifg=#3277a8")
 
-vim.cmd("hi Winbar guibg=None guifg=black")
+vim.cmd("hi Winbar guibg=None guifg=white")
 vim.cmd("hi WinbarNC guibg=None guifg=grey")
 -- vim.cmd("hi NonText guifg=grey")
 
