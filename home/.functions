@@ -2,52 +2,6 @@
 
 # Common functions and utilities that can be shared between bash and zsh
 
-#-(Source Files)--------------------------------------------------------------
-__source__() {
-	local hostname
-	hostname=$(hostname)
-	local file="$HOME/$hostname/$1"
-
-	# Check if hostname-specific file exists
-	if [[ -f "$file" ]]; then
-		# shellcheck source=/dev/null
-		source "$HOME/$1" # Source common file first
-		# shellcheck source=/dev/null
-		source "$file"
-	else
-		echo "Unable to find priv files for $hostname.."
-	fi
-}
-
-__source__ ".env"
-__source__ ".alias"
-__source__ ".rc"
-
-#-(Create files/folders that don't exist but are required )-------------------
-
-# Z script
-Z_SH_PATH="$HOME/z.sh"
-Z_SH_LINK="https://raw.githubusercontent.com/rupa/z/master/z.sh"
-if ! [[ -r "$Z_SH_PATH" ]]; then
-	wget "$Z_SH_LINK" -O "$Z_SH_PATH"
-else
-	# shellcheck source=/dev/null
-	source "$Z_SH_PATH"
-fi
-
-# Create directories that don't exist
-! [[ -d "$VENV_DIR" ]] && mkdir "$VENV_DIR"
-! [[ -d "$CODE_DIR" ]] && mkdir "$CODE_DIR"
-! [[ -d "$NOTES_DIR" ]] && mkdir "$NOTES_DIR"
-! [[ -d "$STASH_DIR" ]] && mkdir "$STASH_DIR"
-
-! [[ -r "$NVM_DIR" ]] &&
-	curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash &&
-	nvm install node &&
-	nvm use node
-
-#-----------------------------------------------------------------------------
-
 cmd_exists() {
 	command -v "$1" 1>/dev/null 2>/dev/null && return 0
 	return 1
@@ -242,5 +196,3 @@ sb() {
 		source "$HOME/.bashrc"
 	fi
 }
-
-source $HOME/.completions
