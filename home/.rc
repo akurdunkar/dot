@@ -6,14 +6,14 @@ __source__() {
 	hostname=$(hostname)
 	local file="$HOME/$hostname/$1"
 
-    # Source common file only if second arg isn't set
-    if [[ -z ${2+set} ]]; then
-        # shellcheck source=/dev/null
-        source "$HOME/$1" # Source common file first
-    fi
+	# Source common file only if second arg isn't set
+	if [ "$#" -lt 2 ]; then
+		# shellcheck source=/dev/null
+		source "$HOME/$1" # Source common file first
+	fi
 
 	# Check if hostname-specific file exists
-    if [[ -f "$file" ]]; then
+	if [[ -f "$file" ]]; then
 		# shellcheck source=/dev/null
 		source "$file"
 	else
