@@ -57,6 +57,8 @@ nmap("<leader>fo", ":Buffers<CR>")
 nmap("<leader>fg", ":Rg <CR>")
 nmap("<leader>fh", ":Helptags <CR>")
 
+nmap("<leader>sp", ":call Spellfloat()<CR>")
+
 -- Better tabbing
 
 vnoremap("<", "<gv")
