@@ -93,73 +93,76 @@ static const Layout layouts[] = {
 /* helper for spawning shell commands in the pre dwm-5.0 fashion */
 #define SHCMD(cmd) { .v = (const char*[]){ "/bin/bash", "-c", cmd, NULL } }
 
+#define Alt Mod1Mask
+#define Super Mod4Mask
+
 /* commands */
-static const char *termcmd[]         = { "/usr/bin/alacritty", NULL };
+static const char *termcmd[]            = { "/usr/bin/alacritty", NULL };
 static const char *webcmd[]             = { "/usr/bin/microsoft-edge", NULL };
 static const char *torrentclicmd[]      = { "t", "alacritty", "-t", "tremc" , "-e", "tremc", NULL};
 static const char *filemanagercmd[]     = { "n", "/usr/bin/thunar", NULL };
 static const char *colorchoosercmd[]    = { "c", "/usr/bin/kcolorchooser", NULL };
 
 static Key keys[] = {
-   /* modifier                               key                          function        argument */
-  { MODKEY,                                 XK_u,                        spawn,                 {.v = webcmd} },
-  { MODKEY,                                 XK_Return,                   spawn,                 {.v = termcmd } },
-  { MODKEY,                                 XK_e,                        togglescratch,         {.v = filemanagercmd } },
-  { MODKEY,                                 XK_q,                        togglescratch,         {.v = torrentclicmd } },
-  { MODKEY|ControlMask|ShiftMask,           XK_c,                        togglescratch,         {.v = colorchoosercmd } },
-  { 0,                                      XF86XK_AudioPrev,            spawn,                 SHCMD("mpc prev")},
-  { 0,                                      XF86XK_AudioNext,            spawn,                 SHCMD("mpc next")},
-  { 0,                                      XF86XK_AudioPlay,            spawn,                 SHCMD("mpc toggle")},
-  { 0,                                      XF86XK_AudioStop,            spawn,                 SHCMD("mpc stop")},
-  { 0,                                      XF86XK_AudioLowerVolume,     spawn,                 SHCMD("pamixer -d 5")},
-  { 0,                                      XF86XK_AudioRaiseVolume,     spawn,                 SHCMD("pamixer -i 5")},
-  { MODKEY,                                 XK_F10,                      spawn,                 SHCMD("xbacklight -inc 10")},
-  { MODKEY,                                 XK_F9,                       spawn,                 SHCMD("xbacklight -dec 10")},
-  { 0,                                      XF86XK_MonBrightnessUp,      spawn,                 SHCMD("xbacklight -inc 10")},
-  { 0,                                      XF86XK_MonBrightnessDown,    spawn,                 SHCMD("xbacklight -dec 10")},
-  { MODKEY|ShiftMask,                       XK_F5,                       spawn,                 SHCMD("reload_keys")},
-  { MODKEY,                                 XK_v,                        spawn,                 SHCMD("copyq menu")},
-  { MODKEY,                                 XK_t,                        setlayout,             {.v = &layouts[0]} },
-  { MODKEY,                                 XK_m,                        setlayout,             {.v = &layouts[2]} },
-  { MODKEY,                                 XK_g,                        setlayout,             {.v = &layouts[3]} },
-  { MODKEY,                                 XK_s,                        setlayout,             {.v = &layouts[4]} },
-  { MODKEY,                                 XK_b,                        setlayout,             {.v = &layouts[5]} },
-  { Mod1Mask,                               XK_b,                        togglebar,             {0} },
-  { MODKEY,                                 XK_j,                        focusstackvis,         {.i = +1 } },
-  { MODKEY,                                 XK_k,                        focusstackvis,         {.i = -1 } },
-  { MODKEY|ShiftMask,                       XK_j,                        focusstackhid,         {.i = +1 } },
-  { MODKEY|ShiftMask,                       XK_k,                        focusstackhid,         {.i = -1 } },
-  { MODKEY|ShiftMask,                       XK_minus,                    incnmaster,            {.i = +1 } },
-  { MODKEY,                                 XK_d,                        incnmaster,            {.i = -1 } },
-  { MODKEY,                                 XK_h,                        setmfact,              {.f = -0.05} },
-  { MODKEY,                                 XK_l,                        setmfact,              {.f = +0.05} },
-  { MODKEY,                                 XK_Tab,                      view,                  {0} },
-  { MODKEY|ShiftMask,                       XK_c,                        killclient,            {0} },
-  { MODKEY,                                 XK_c,                        killclient,            {0} },
-  { MODKEY,                                 XK_f,                        togglefullscr,         {0} },
-  { MODKEY,                                 XK_m,                        zoom,                  {0} },
-  { MODKEY,                                 XK_0,                        view,                  {.ui = ~0 } },
-  { MODKEY|ShiftMask,                       XK_0,                        tag,                   {.ui = ~0 } },
-  { MODKEY,                                 XK_comma,                    focusmon,              {.i = -1 } },
-  { MODKEY,                                 XK_period,                   focusmon,              {.i = +1 } },
-  { MODKEY|ShiftMask,                       XK_comma,                    tagmon,                {.i = -1 } },
-  { MODKEY|ShiftMask,                       XK_period,                   tagmon,                {.i = +1 } },
-  { MODKEY,                                 XK_minus,                    setgaps,               {.i = -1 } },
-  { MODKEY,                                 XK_equal,                    setgaps,               {.i = +1 } },
-  { MODKEY|ShiftMask,                       XK_equal,                    setgaps,               {.i = 0  } },
-  { MODKEY|ShiftMask,                       XK_space,                    togglefloating,        {0} },
-  { MODKEY,                                 XK_s,                        show,                  {0} },
-  { MODKEY,                                 XK_o,                        hide,                  {0} },
-  TAGKEYS(                                  XK_1,                        0)
-  TAGKEYS(                                  XK_2,                        1)
-  TAGKEYS(                                  XK_3,                        2)
-  TAGKEYS(                                  XK_4,                        3)
-  TAGKEYS(                                  XK_5,                        4)
-  TAGKEYS(                                  XK_6,                        5)
-  TAGKEYS(                                  XK_7,                        6)
-  TAGKEYS(                                  XK_8,                        7)
-  TAGKEYS(                                  XK_9,                        8)
-  { MODKEY|ShiftMask|ControlMask,           XK_q,                        quit,           {0} },
+/*  modifier                                   key                          function               argument     */
+  { Super,                                     XK_u,                        spawn,                 {.v = webcmd} },
+  { Super,                                     XK_Return,                   spawn,                 {.v = termcmd } },
+  { Super,                                     XK_e,                        togglescratch,         {.v = filemanagercmd } },
+  { Super,                                     XK_q,                        togglescratch,         {.v = torrentclicmd } },
+  { Super | ControlMask | ShiftMask,           XK_c,                        togglescratch,         {.v = colorchoosercmd } },
+  { 0,                                         XF86XK_AudioPrev,            spawn,                 SHCMD("mpc prev")},
+  { 0,                                         XF86XK_AudioNext,            spawn,                 SHCMD("mpc next")},
+  { 0,                                         XF86XK_AudioPlay,            spawn,                 SHCMD("mpc toggle")},
+  { 0,                                         XF86XK_AudioStop,            spawn,                 SHCMD("mpc stop")},
+  { 0,                                         XF86XK_AudioLowerVolume,     spawn,                 SHCMD("pamixer -d 5")},
+  { 0,                                         XF86XK_AudioRaiseVolume,     spawn,                 SHCMD("pamixer -i 5")},
+  { Super,                                     XK_F10,                      spawn,                 SHCMD("xbacklight -inc 10")},
+  { Super,                                     XK_F9,                       spawn,                 SHCMD("xbacklight -dec 10")},
+  { 0,                                         XF86XK_MonBrightnessUp,      spawn,                 SHCMD("xbacklight -inc 10")},
+  { 0,                                         XF86XK_MonBrightnessDown,    spawn,                 SHCMD("xbacklight -dec 10")},
+  { Super | ShiftMask,                         XK_F5,                       spawn,                 SHCMD("reload_keys")},
+  { Super,                                     XK_v,                        spawn,                 SHCMD("copyq menu")},
+  { Super,                                     XK_t,                        setlayout,             {.v = &layouts[0]} },
+  { Super | ShiftMask,                         XK_m,                        setlayout,             {.v = &layouts[2]} },
+  { Super,                                     XK_g,                        setlayout,             {.v = &layouts[3]} },
+  { Super | ShiftMask,                         XK_s,                        setlayout,             {.v = &layouts[4]} },
+  { Super,                                     XK_b,                        setlayout,             {.v = &layouts[5]} },
+  { Alt,                                       XK_b,                        togglebar,             {0} },
+  { Super,                                     XK_j,                        focusstackvis,         {.i = +1 } },
+  { Super,                                     XK_k,                        focusstackvis,         {.i = -1 } },
+  { Super | ShiftMask,                         XK_j,                        focusstackhid,         {.i = +1 } },
+  { Super | ShiftMask,                         XK_k,                        focusstackhid,         {.i = -1 } },
+  { Super | ShiftMask,                         XK_minus,                    incnmaster,            {.i = +1 } },
+  { Super,                                     XK_d,                        incnmaster,            {.i = -1 } },
+  { Super,                                     XK_h,                        setmfact,              {.f = -0.05} },
+  { Super,                                     XK_l,                        setmfact,              {.f = +0.05} },
+  { Super,                                     XK_Tab,                      view,                  {0} },
+  { Super | ShiftMask,                         XK_c,                        killclient,            {0} },
+  { Super,                                     XK_c,                        killclient,            {0} },
+  { Super,                                     XK_f,                        togglefullscr,         {0} },
+  { Super,                                     XK_m,                        zoom,                  {0} },
+  { Super,                                     XK_0,                        view,                  {.ui = ~0 } },
+  { Super | ShiftMask,                         XK_0,                        tag,                   {.ui = ~0 } },
+  { Super,                                     XK_comma,                    focusmon,              {.i = -1 } },
+  { Super,                                     XK_period,                   focusmon,              {.i = +1 } },
+  { Super | ShiftMask,                         XK_comma,                    tagmon,                {.i = -1 } },
+  { Super | ShiftMask,                         XK_period,                   tagmon,                {.i = +1 } },
+  { Super,                                     XK_minus,                    setgaps,               {.i = -1 } },
+  { Super,                                     XK_equal,                    setgaps,               {.i = +1 } },
+  { Super | ShiftMask,                         XK_equal,                    setgaps,               {.i = 0  } },
+  { Super | ShiftMask,                         XK_space,                    togglefloating,        {0} },
+  { Super,                                     XK_s,                        show,                  {0} },
+  { Alt,                                       XK_m,                        hide,                  {0} },
+  { Super | ShiftMask | ControlMask,           XK_q,                        quit,                  {0} },
+  TAGKEYS(                                     XK_1,                        0)
+  TAGKEYS(                                     XK_2,                        1)
+  TAGKEYS(                                     XK_3,                        2)
+  TAGKEYS(                                     XK_4,                        3)
+  TAGKEYS(                                     XK_5,                        4)
+  TAGKEYS(                                     XK_6,                        5)
+  TAGKEYS(                                     XK_7,                        6)
+  TAGKEYS(                                     XK_8,                        7)
+  TAGKEYS(                                     XK_9,                        8)
 };
 
 /* button definitions */
