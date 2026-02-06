@@ -1,12 +1,29 @@
-#!/bin/bash
+#!/bin/sh
 
-batteryPercentage=$(cat /sys/class/power_supply/BAT0/capacity)
-charging=$(acpi | awk '{print $3}')
+# Exit if no battery exists
+if [ ! -f /sys/class/power_supply/BAT0/capacity ]; then
+	printf "^c%s^ " "$BLUE_COLOR"
+	exit 0
+fi
+
+battery_percentage=$(cat /sys/class/power_supply/BAT0/capacity)
+charging=$(acpi 2>/dev/null | awk '{print $3}')
 NFILE="$HOME/scripts/nfile"
-minValue=20
+min_battery_allowed=20
 
-[[ $batteryPercentage -lt $minValue ]] && ! [[ -e "$NFILE" ]] && touch "$NFILE" && notify-send -u critical Low\ Battery! Please\ Plugin\ The\ Charge
+# Low battery notification
+if [ "$battery_percentage" -lt "$min_battery_allowed" ] && [ ! -e "$NFILE" ]; then
+	touch "$NFILE"
+	notify-send -u critical "Low Battery!" "Please Plugin The Charge"
+fi
 
-! [[ $batteryPercentage -lt $minValue ]] && rm "$NFILE"
+# Remove notification file when battery is sufficient
+if [ "$battery_percentage" -ge "$min_battery_allowed" ] && [ -e "$NFILE" ]; then
+	rm "$NFILE"
+fi
 
-printf " ^c%s^  %s %s" "$YELLOW_COLOR" "$batteryPercentage" "$([ "$charging" == "Charging," ] && echo " ")"
+if [ "$charging" = "Charging," ]; then
+	printf " ^c%s^  %s  " "$YELLOW_COLOR" "$battery_percentage"
+else
+	printf " ^c%s^  %s " "$YELLOW_COLOR" "$battery_percentage"
+fi
