@@ -25,6 +25,8 @@ require("lazy").setup({
     { 'junegunn/fzf.vim' },
 
     -- Color Schemes
+    -- 'tjdevries/colorbuddy.nvim',
+    -- 'aktersnurra/no-clown-fiesta.nvim',
     -- 'mhartington/oceanic-next',
     -- 'navarasu/onedark.nvim',
     -- 'folke/tokyonight.nvim',
@@ -37,7 +39,7 @@ require("lazy").setup({
     -- { "ellisonleao/gruvbox.nvim",     dependencies = { "rktjmp/lush.nvim" } },
     -- { "briones-gabriel/darcula-solid.nvim", dependencies = "rktjmp/lush.nvim" },
     -- 'nyoom-engineering/oxocarbon.nvim',
-    'ishan9299/nvim-solarized-lua',
+    -- 'ishan9299/nvim-solarized-lua',
     -- 'savq/melange-nvim',
     -- 'yorickpeterse/vim-paper',
     -- 'yorickpeterse/nvim-grey',
@@ -119,12 +121,6 @@ require("lazy").setup({
     'onsails/lspkind-nvim',
 
     'aditya-K2/spellfloat',
-    -- {
-    --     'aditya-K2/termtoggle.nvim',
-    --     config = function()
-    --         require('termtoggle').setup()
-    --     end
-    -- },
 
     { 'fatih/vim-go', ft = "go" },
 
@@ -143,10 +139,10 @@ require("lazy").setup({
             "TmuxNavigatorProcessList",
         },
         keys = {
-            { "<M-h>", "<cmd>TmuxNavigateLeft<cr>" },
-            { "<M-j>", "<cmd>TmuxNavigateDown<cr>" },
-            { "<M-k>", "<cmd>TmuxNavigateUp<cr>" },
-            { "<M-l>", "<cmd>TmuxNavigateRight<cr>" },
+            { "<M-h>",  "<cmd>TmuxNavigateLeft<cr>" },
+            { "<M-j>",  "<cmd>TmuxNavigateDown<cr>" },
+            { "<M-k>",  "<cmd>TmuxNavigateUp<cr>" },
+            { "<M-l>",  "<cmd>TmuxNavigateRight<cr>" },
             { "<M-\\>", "<cmd>TmuxNavigatePrevious<cr>" },
         },
     },

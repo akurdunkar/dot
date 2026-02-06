@@ -28,7 +28,7 @@ end
 
 vim.cmd [[
     syntax enable
-    color solarized
+    color quiet
     syntax on
 ]]
 
