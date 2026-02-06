@@ -28,7 +28,7 @@ end
 
 vim.cmd [[
     syntax enable
-    color quiet
+    color scruber
     syntax on
 ]]
 
@@ -65,20 +65,3 @@ vim.opt.spelloptions = "camel"
 vim.opt.expandtab = true
 vim.opt.laststatus = 0
 vim.opt.mouse = "a"
-
--- Highlights
-
-vim.cmd("hi DiagnosticVirtualTextError gui=italic guifg=#a84032")
-vim.cmd("hi DiagnosticVirtualTextInfo gui=italic guifg=#3277a8")
-vim.cmd("hi DiagnosticVirtualTextWarn gui=italic guifg=#d1cf47")
-vim.cmd("hi DiagnosticVirtualTextOk gui=italic guifg=#3277a8")
-
-vim.cmd("hi Winbar guibg=None guifg=white")
-vim.cmd("hi WinbarNC guibg=None guifg=grey")
--- vim.cmd("hi NonText guifg=grey")
-
--- vim.cmd("hi Normal guibg=black")
--- vim.cmd("hi LineNr guibg=None")
--- vim.cmd("hi SignColumn guibg=None")
--- vim.cmd("hi EndOfBuffer guibg=None")
--- vim.cmd("hi NormalNC guibg=None")

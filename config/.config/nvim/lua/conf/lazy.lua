@@ -24,31 +24,8 @@ require("lazy").setup({
     { 'junegunn/fzf',    build = function() vim.cmd('call fzf#install()') end },
     { 'junegunn/fzf.vim' },
 
-    -- Color Schemes
-    -- 'tjdevries/colorbuddy.nvim',
-    -- 'aktersnurra/no-clown-fiesta.nvim',
-    -- 'mhartington/oceanic-next',
-    -- 'navarasu/onedark.nvim',
-    -- 'folke/tokyonight.nvim',
-    -- 'Mofiqul/vscode.nvim',
-    -- 'projekt0n/github-nvim-theme',
-    -- 'sainnhe/everforest',
-    -- 'sainnhe/sonokai',
-    -- 'RRethy/nvim-base16',
-    -- "rebelot/kanagawa.nvim",
-    -- { "ellisonleao/gruvbox.nvim",     dependencies = { "rktjmp/lush.nvim" } },
-    -- { "briones-gabriel/darcula-solid.nvim", dependencies = "rktjmp/lush.nvim" },
-    -- 'nyoom-engineering/oxocarbon.nvim',
-    -- 'ishan9299/nvim-solarized-lua',
-    -- 'savq/melange-nvim',
-    -- 'yorickpeterse/vim-paper',
-    -- 'yorickpeterse/nvim-grey',
-    -- 'davidosomething/vim-colors-meh',
-    -- 'Shatur/neovim-ayu',
-    -- 'https://gitlab.com/madyanov/gruber.vim',
-    -- 'aditya-K2/scruber.vim',
-    -- 'vim/colorschemes',
-    -- "craftzdog/solarized-osaka.nvim",
+    -- Color scheme
+    'aditya-K2/scruber.vim',
 
     { 'iamcco/markdown-preview.nvim',           build = 'cd app && yarn install' },
     {
