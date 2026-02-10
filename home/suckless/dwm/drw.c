@@ -189,7 +189,7 @@ drw_clr_create(Drw *drw, Clr *dest, const char *clrname)
 	if (!XftColorAllocName(drw->dpy, DefaultVisual(drw->dpy, drw->screen),
 	                       DefaultColormap(drw->dpy, drw->screen),
 	                       clrname, dest))
-		die("error, cannot allocate color '%s'", clrname);
+		fprintf(stderr, "error, cannot allocate color '%s'\n", clrname);
 }
 
 /* Wrapper to create color schemes. The caller has to call free(3) on the

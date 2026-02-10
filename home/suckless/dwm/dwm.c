@@ -907,7 +907,7 @@ drawstatusbar(Monitor *m, int bh, char* stext) {
 			x += w;
 
 			/* process code */
-			while (text[++i] != '^') {
+			while (text[++i] && text[i] != '^') {
 				if (text[i] == 'c') {
 					char buf[8];
 					memcpy(buf, (char*)text+i+1, 7);
