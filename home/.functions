@@ -102,8 +102,8 @@ fg() {
 	selection=$(rg_cmd | fzf_cmd | head -n1)
 	if [[ -n "$selection" ]]; then
 		# Expected format: filename:line:optional_text
-		file=$(echo "$selection" | cut -d':' -f1)
-		line=$(echo "$selection" | cut -d':' -f2)
+		file=$(echo "$selection" | awk -F':' '{print $1}')
+		line=$(echo "$selection" | awk -F':' '{print $2}')
 
 		# Fallback if no line number is found
 		if [[ -z "$line" ]]; then
