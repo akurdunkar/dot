@@ -30,49 +30,9 @@ rg_cmd() {
 	rg --color=always --colors 'match:fg:green' --column --line-number --hidden --ignore-case --no-heading .
 }
 
-dmenu_cmd() {
-	dmenu -i -f -l 10
-}
-
 fk() {
 	[[ $1 == "" ]] && return 1
 	pgrep -a "$1" | fzf_cmd | awk '{print $1}' | xargs -r kill
-}
-
-venv() {
-	case "$1" in
-	"new")
-		if [[ "$2" != "" ]]; then
-			virtualenv "$VENV_DIR/$2" && {
-				# shellcheck source=/dev/null
-				source "$VENV_DIR/$2/bin/activate"
-			}
-		else
-			echo "Empty Name Provided!"
-		fi
-		;;
-	"remove")
-		if [[ "$2" != "" ]]; then
-			\rm -rf "${VENV_DIR:?}/$2" &&
-				echo "Removed $2 Succesfully!"
-		else
-			echo "Empty Name Provided!"
-		fi
-		command -v deactivate && deactivate
-		;;
-	"-f")
-		local sel
-		sel="$(find "$VENV_DIR" -maxdepth 1 -mindepth 1 -type d | fzf_cmd)"
-		if [[ "$sel" != "" ]]; then
-			# shellcheck source=/dev/null
-			source "$sel/bin/activate"
-		fi
-		;;
-	"source")
-		# shellcheck source=/dev/null
-		source "$VENV_DIR/$2/bin/activate"
-		;;
-	esac
 }
 
 tl() {
@@ -115,26 +75,6 @@ fg() {
 	fi
 }
 
-cco() {
-	if [[ "$1" == "-m" ]]; then
-		printf "Making Directory %s\n" "$2"
-		mkdir "$CODE_DIR/$2"
-		printf "Changing Directory to %s\n" "$2"
-		cd "$CODE_DIR/$2" || return
-	elif [[ "$1" == "-f" ]]; then
-		dir=$(find "$CODE_DIR" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' | fzf_cmd)
-		cd "$CODE_DIR/$dir" || return
-	elif [[ "$1" == "-rm" || "$1" == "rm" ]]; then
-		\rm -ivr "${CODE_DIR:?}/$2"
-	elif [[ "$1" == "-c" ]]; then
-		cd "$CODE_DIR/$2" || return
-	else
-		f="$1"
-		shift 1>/dev/null 2>/dev/null
-		z "$CODE_DIR/$f" "$@"
-	fi
-}
-
 fs() {
 	fzf_cmd | xargs -r -d '\n' "$EDITOR"
 }
@@ -143,30 +83,6 @@ all_files() {
 	local fd_cmd
 	fd_cmd=$(fd_command)
 	eval "$fd_cmd . $1"
-}
-
-conf() {
-	local dir="NOT SET"
-	local GO_TO_DIR=0
-	# Args
-	for i in "$@"; do
-		if [[ "$i" == "-g" ]]; then
-			GO_TO_DIR=1
-		else
-			dir="$i"
-		fi
-	done
-
-	# Dir
-	if [[ "$dir" == "NOT SET" ]]; then
-		dir=$(find "$HOME/.config" -maxdepth 1 -mindepth 1 -printf '%f\n' | fzf_cmd)
-	fi
-
-	if [[ "$GO_TO_DIR" == "1" ]]; then
-		cd "$HOME/.config/$dir" || return
-	else
-		"$EDITOR" "$HOME/.config/$dir"
-	fi
 }
 
 fn() {
