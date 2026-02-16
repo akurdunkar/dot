@@ -16,6 +16,16 @@
         "make",
         "make install"
       ]
+    },
+    "nvm": {
+      "repo": "nvm-sh/nvm",
+      "artifact": "source",
+      "bin": "nvm",
+      "build_cmds": [
+        "tar xzf {artifact} --strip-components=1",
+        "bash ./install.sh",
+        ". $NVM_DIR/nvm.sh && nvm install node"
+      ]
     }
   }
 }
