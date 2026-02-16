@@ -10,7 +10,7 @@ import tempfile
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Deque, Dict, Iterable, List, Optional, Tuple
+from typing import IO, Any, Deque, Dict, Iterable, List, Optional, Tuple
 
 import requests
 from colored import attr, fg
@@ -23,6 +23,7 @@ LockData = Dict[str, Any]
 PKG_JSON: Path = Path.home() / "pkg.json"
 PKG_LOCK: Path = Path.home() / "pkg.lock"
 DEFAULT_INSTALL_DIR: Path = Path.home() / ".local" / "bin"
+BUILD_LOG: Path = Path("/tmp/pack.build.log")
 
 DIM: str = attr("dim")
 GREEN: str = fg("green")
@@ -102,13 +103,16 @@ def clear_lines(n: int) -> None:
         sys.stdout.flush()
 
 
-def run_build_cmds(cmds: List[str], variables: Dict[str, str], cwd: str) -> None:
+def run_build_cmds(
+    cmds: List[str], variables: Dict[str, str], cwd: str, log: IO[str]
+) -> None:
     term_cols: int = shutil.get_terminal_size((80, 24)).columns
     max_line_len: int = term_cols - 6
 
     for i, cmd in enumerate(cmds, 1):
         expanded: str = cmd.format(**variables)
         print(f"  {BOLD}[{i}/{len(cmds)}]{RESET} {expanded}")
+        log.write(f"$ {expanded}\n")
 
         proc: subprocess.Popen[str] = subprocess.Popen(
             expanded,
@@ -125,7 +129,9 @@ def run_build_cmds(cmds: List[str], variables: Dict[str, str], cwd: str) -> None
 
         try:
             for line in proc.stdout:
-                buf.append(line.rstrip("\n"))
+                raw: str = line.rstrip("\n")
+                buf.append(raw)
+                log.write(line)
 
                 clear_lines(lines_on_screen)
 
@@ -141,12 +147,15 @@ def run_build_cmds(cmds: List[str], variables: Dict[str, str], cwd: str) -> None
             raise
 
         returncode: int = proc.wait()
+        log.write(f"exit {returncode}\n\n")
+        log.flush()
 
         clear_lines(lines_on_screen)
 
         if returncode != 0:
             for buf_line in buf:
                 print(f"  {DIM}    {buf_line}{RESET}")
+            print(f"  {DIM}full log: {BUILD_LOG}{RESET}")
             raise RuntimeError(f"build command failed (exit {returncode}): {expanded}")
 
 
@@ -156,6 +165,7 @@ def update_package(
     lock: LockData,
     g: Github,
     install_dir: Path,
+    log: IO[str],
     force: bool = False,
 ) -> None:
     repo_name: str = pkg_config["repo"]
@@ -223,7 +233,8 @@ def update_package(
                 "tmpdir": tmpdir,
             }
 
-            run_build_cmds(build_cmds, variables, cwd=tmpdir)
+            log.write(f"=== {name} ({repo_name}) ===\n")
+            run_build_cmds(build_cmds, variables, cwd=tmpdir, log=log)
     else:
         target: Path = install_dir / bin_name
         backup: Path = target.with_suffix(".backup")
@@ -267,14 +278,23 @@ def cmd_update(args: argparse.Namespace, config: PkgConfig) -> None:
     g: Github = get_github_client()
     targets: List[str] = args.packages if args.packages else list(packages.keys())
 
-    for name in targets:
-        if name not in packages:
-            print(f"  {RED}[F]{RESET} unknown package: {name}", file=sys.stderr)
-            continue
-        try:
-            update_package(name, packages[name], lock, g, install_dir, force=args.force)
-        except Exception as e:
-            print(f"  {RED}[F]{RESET} {e}", file=sys.stderr)
+    with open(BUILD_LOG, "w") as log:
+        for name in targets:
+            if name not in packages:
+                print(f"  {RED}[F]{RESET} unknown package: {name}", file=sys.stderr)
+                continue
+            try:
+                update_package(
+                    name,
+                    packages[name],
+                    lock,
+                    g,
+                    install_dir,
+                    log=log,
+                    force=args.force,
+                )
+            except Exception as e:
+                print(f"  {RED}[F]{RESET} {e}", file=sys.stderr)
 
     save_pkg_lock(lock)
 
