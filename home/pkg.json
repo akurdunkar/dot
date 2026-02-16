@@ -35,6 +35,15 @@
                 "tar xzf {artifact} --strip-components=1",
                 "cp -vf z.sh $HOME"
             ]
+        },
+        "meson": {
+            "repo": "mesonbuild/meson",
+            "artifact": "meson-{version}.tar.gz",
+            "bin": "meson",
+            "build_cmds": [
+                "tar xzf {artifact} --strip-components=1",
+                "pip install --user --break-system-packages ."
+            ]
         }
     }
 }
