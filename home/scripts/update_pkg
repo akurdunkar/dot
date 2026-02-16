@@ -1,0 +1,257 @@
+#!/usr/bin/env python3
+
+import argparse
+import json
+import subprocess
+import sys
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import requests
+from github import Github
+
+PKG_JSON: Path = Path.home() / "pkg.json"
+PKG_LOCK: Path = Path.home() / "pkg.lock"
+DEFAULT_INSTALL_DIR: Path = Path.home() / ".local" / "bin"
+
+
+def load_pkg_json() -> Dict[str, Any]:
+    if not PKG_JSON.exists():
+        print(f"error: {PKG_JSON} not found", file=sys.stderr)
+        sys.exit(1)
+    with open(PKG_JSON) as f:
+        return json.load(f)
+
+
+def load_pkg_lock() -> Dict[str, Any]:
+    if PKG_LOCK.exists():
+        with open(PKG_LOCK) as f:
+            return json.load(f)
+    return {"packages": {}}
+
+
+def save_pkg_lock(lock: Dict[str, Any]) -> None:
+    with open(PKG_LOCK, "w") as f:
+        json.dump(lock, f, indent=2)
+        f.write("\n")
+
+
+def find_asset(assets, artifact: Optional[str]):
+    """Find the release asset to download.
+
+    If artifact is specified, match by exact name.
+    Otherwise default to the first .appimage file found.
+    """
+    for asset in assets:
+        if artifact and asset.name == artifact:
+            return asset
+        if not artifact and asset.name.lower().endswith(".appimage"):
+            return asset
+    return None
+
+
+def run_build_cmds(cmds: List[str], variables: Dict[str, str], cwd: str) -> None:
+    """Run build commands sequentially, displaying each and its output."""
+    for i, cmd in enumerate(cmds, 1):
+        expanded = cmd.format(**variables)
+        print(f"  [{i}/{len(cmds)}] {expanded}")
+        result = subprocess.run(
+            expanded, shell=True, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+        )
+        if result.stdout.strip():
+            for line in result.stdout.strip().splitlines():
+                print(f"    {line}")
+        if result.returncode != 0:
+            raise RuntimeError(f"build command failed (exit {result.returncode}): {expanded}")
+
+
+def update_package(
+    name: str,
+    pkg_config: Dict[str, Any],
+    lock: Dict[str, Any],
+    g: Github,
+    install_dir: Path,
+    force: bool = False,
+) -> None:
+    repo_name: str = pkg_config["repo"]
+    artifact: Optional[str] = pkg_config.get("artifact")
+    bin_name: str = pkg_config.get("bin", name)
+
+    print(f"\n--- {name} ({repo_name}) ---")
+
+    current = lock.get("packages", {}).get(name, {})
+    current_version: str = current.get("version", "none")
+    print(f"  installed: {current_version}")
+
+    repo = g.get_repo(repo_name)
+    latest = repo.get_latest_release()
+    latest_version: str = latest.tag_name.lstrip("v")
+    print(f"  latest:    {latest_version}")
+
+    if current_version == latest_version and not force:
+        print("  already up to date")
+        return
+
+    if artifact == "source":
+        download_url: str = latest.tarball_url
+        artifact_name: str = f"{name}-{latest_version}.tar.gz"
+    else:
+        resolved_artifact = artifact.format(version=latest_version) if artifact else None
+        asset = find_asset(latest.get_assets(), resolved_artifact)
+        if not asset:
+            kind = f"artifact '{resolved_artifact}'" if resolved_artifact else "appimage"
+            print(f"  error: no {kind} found in release assets", file=sys.stderr)
+            return
+        download_url = asset.browser_download_url
+        artifact_name = asset.name
+
+    print(f"  artifact:  {artifact_name}")
+    response: str = input(
+        f"  update {name} from {current_version} to {latest_version}? [y/N] "
+    )
+    if response.lower() != "y":
+        print("  skipped")
+        return
+
+    build_cmds: Optional[List[str]] = pkg_config.get("build_cmds")
+
+    print(f"  downloading {artifact_name}...")
+    resp = requests.get(download_url, stream=True)
+    resp.raise_for_status()
+
+    install_dir.mkdir(parents=True, exist_ok=True)
+
+    if build_cmds:
+        with tempfile.TemporaryDirectory(prefix=f"update_pkg_{name}_") as tmpdir:
+            artifact_path: Path = Path(tmpdir) / artifact_name
+            with open(artifact_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            artifact_path.chmod(0o755)
+
+            variables = {
+                "artifact": str(artifact_path),
+                "install_dir": str(install_dir),
+                "bin": bin_name,
+                "version": latest_version,
+                "tmpdir": tmpdir,
+            }
+
+            run_build_cmds(build_cmds, variables, cwd=tmpdir)
+    else:
+        target: Path = install_dir / bin_name
+        backup: Path = target.with_suffix(".backup")
+
+        if target.exists():
+            target.rename(backup)
+
+        with open(target, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+        target.chmod(0o755)
+
+        if backup.exists():
+            backup.unlink()
+
+    lock.setdefault("packages", {})[name] = {
+        "version": latest_version,
+        "artifact": artifact_name,
+        "repo": repo_name,
+        "installed_at": datetime.now(timezone.utc).isoformat(),
+        "url": download_url,
+    }
+
+    print(f"  installed {name} v{latest_version}")
+
+
+def cmd_update(args, config: Dict[str, Any]) -> None:
+    lock = load_pkg_lock()
+    install_dir = Path(config.get("install_dir", str(DEFAULT_INSTALL_DIR))).expanduser()
+    packages = config.get("packages", {})
+
+    g = Github()
+
+    targets = args.packages if args.packages else list(packages.keys())
+
+    for name in targets:
+        if name not in packages:
+            print(f"unknown package: {name}", file=sys.stderr)
+            continue
+        try:
+            update_package(name, packages[name], lock, g, install_dir, force=args.force)
+        except Exception as e:
+            print(f"  error: {e}", file=sys.stderr)
+
+    save_pkg_lock(lock)
+
+
+def cmd_list(args, config: Dict[str, Any]) -> None:
+    lock = load_pkg_lock()
+    packages = config.get("packages", {})
+    lock_pkgs = lock.get("packages", {})
+
+    for name in packages:
+        if name in lock_pkgs:
+            info = lock_pkgs[name]
+            ts = info.get("installed_at", "unknown")
+            print(f"  {name}: v{info['version']} (installed {ts})")
+        else:
+            print(f"  {name}: not installed")
+
+
+def cmd_status(args, config: Dict[str, Any]) -> None:
+    lock = load_pkg_lock()
+    packages = config.get("packages", {})
+    lock_pkgs = lock.get("packages", {})
+
+    g = Github()
+
+    for name, pkg_config in packages.items():
+        current_version = lock_pkgs.get(name, {}).get("version", "none")
+        try:
+            repo = g.get_repo(pkg_config["repo"])
+            latest = repo.get_latest_release()
+            latest_version = latest.tag_name.lstrip("v")
+            marker = "*" if current_version != latest_version else " "
+            print(f"  {marker} {name}: {current_version} -> {latest_version}")
+        except Exception as e:
+            print(f"    {name}: {current_version} (error checking: {e})")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Update packages from GitHub releases")
+    sub = parser.add_subparsers(dest="command")
+
+    p_update = sub.add_parser("update", help="Update packages")
+    p_update.add_argument("packages", nargs="*", help="Packages to update (default: all)")
+    p_update.add_argument("-f", "--force", action="store_true", help="Force re-download")
+
+    sub.add_parser("list", help="List packages and installed versions")
+    sub.add_parser("status", help="Check for available updates")
+
+    args = parser.parse_args()
+    config = load_pkg_json()
+
+    if args.command == "update" or args.command is None:
+        if args.command is None:
+            args.packages = []
+            args.force = False
+        cmd_update(args, config)
+    elif args.command == "list":
+        cmd_list(args, config)
+    elif args.command == "status":
+        cmd_status(args, config)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\naborted")
+        sys.exit(130)
+    except Exception as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)

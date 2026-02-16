@@ -1,0 +1,21 @@
+{
+  "install_dir": "~/.local/bin",
+  "packages": {
+    "nvim": {
+      "repo": "neovim/neovim",
+      "artifact": "nvim-linux-x86_64.appimage",
+      "bin": "nvim"
+    },
+    "tmux": {
+      "repo": "tmux/tmux",
+      "artifact": "tmux-{version}.tar.gz",
+      "bin": "tmux",
+      "build_cmds": [
+        "tar xzf {artifact} --strip-components=1",
+        "./configure --prefix=$HOME/.local --bindir={install_dir}",
+        "make",
+        "make install"
+      ]
+    }
+  }
+}
