@@ -2,13 +2,13 @@
 
 # Exit if no battery exists
 if [ ! -f /sys/class/power_supply/BAT0/capacity ]; then
-	printf "^c%s^ " "$BLUE_COLOR"
+	printf "^c%s^   " "$BLUE_COLOR"
 	exit 0
 fi
 
 battery_percentage=$(cat /sys/class/power_supply/BAT0/capacity)
 charging=$(acpi 2>/dev/null | awk '{print $3}')
-NFILE="$HOME/scripts/nfile"
+NFILE="/tmp/nfile"
 min_battery_allowed=20
 
 # Low battery notification
