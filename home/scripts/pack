@@ -2,15 +2,20 @@
 
 import argparse
 import json
+import os
+import shutil
 import subprocess
 import sys
 import tempfile
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Deque, Dict, Iterable, List, Optional, Tuple
 
 import requests
+from colored import attr, fg
 from github import Github
+from yaspin import yaspin
 
 PkgConfig = Dict[str, Any]
 LockData = Dict[str, Any]
@@ -19,10 +24,43 @@ PKG_JSON: Path = Path.home() / "pkg.json"
 PKG_LOCK: Path = Path.home() / "pkg.lock"
 DEFAULT_INSTALL_DIR: Path = Path.home() / ".local" / "bin"
 
+DIM: str = attr("dim")
+GREEN: str = fg("green")
+CYAN: str = fg("cyan")
+YELLOW: str = fg("yellow")
+RED: str = fg("red")
+BOLD: str = attr("bold")
+RESET: str = attr("reset")
+
+BUILD_LOG_LINES: int = 15
+
+
+def get_github_client() -> Github:
+    """Create an authenticated GitHub client.
+
+    Tries GITHUB_TOKEN env var, then gh CLI, then falls back to unauthenticated.
+    """
+    token: Optional[str] = os.environ.get("GITHUB_TOKEN")
+    if token:
+        return Github(token)
+
+    try:
+        result: subprocess.CompletedProcess[str] = subprocess.run(
+            ["gh", "auth", "token"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return Github(result.stdout.strip())
+    except FileNotFoundError:
+        pass
+
+    return Github()
+
 
 def load_pkg_json() -> PkgConfig:
     if not PKG_JSON.exists():
-        print(f"error: {PKG_JSON} not found", file=sys.stderr)
+        print(f"  {RED}[F]{RESET} {PKG_JSON} not found", file=sys.stderr)
         sys.exit(1)
     with open(PKG_JSON) as f:
         return json.load(f)
@@ -42,11 +80,6 @@ def save_pkg_lock(lock: LockData) -> None:
 
 
 def find_asset(assets: Iterable[Any], artifact: Optional[str]) -> Optional[Any]:
-    """Find the release asset to download.
-
-    If artifact is specified, match by exact name.
-    Otherwise default to the first .appimage file found.
-    """
     for asset in assets:
         if artifact:
             if asset.name == artifact:
@@ -57,18 +90,27 @@ def find_asset(assets: Iterable[Any], artifact: Optional[str]) -> Optional[Any]:
 
 
 def download_to(resp: requests.Response, dest: Path) -> None:
-    """Stream a response body to a file."""
     with open(dest, "wb") as f:
         for chunk in resp.iter_content(chunk_size=8192):
             f.write(chunk)
 
 
+def clear_lines(n: int) -> None:
+    """Move cursor up n lines and clear everything below."""
+    if n > 0:
+        sys.stdout.write(f"\033[{n}A\033[J")
+        sys.stdout.flush()
+
+
 def run_build_cmds(cmds: List[str], variables: Dict[str, str], cwd: str) -> None:
-    """Run build commands sequentially, displaying each and its output."""
+    term_cols: int = shutil.get_terminal_size((80, 24)).columns
+    max_line_len: int = term_cols - 6
+
     for i, cmd in enumerate(cmds, 1):
         expanded: str = cmd.format(**variables)
-        print(f"  [{i}/{len(cmds)}] {expanded}")
-        result: subprocess.CompletedProcess[str] = subprocess.run(
+        print(f"  {BOLD}[{i}/{len(cmds)}]{RESET} {expanded}")
+
+        proc: subprocess.Popen[str] = subprocess.Popen(
             expanded,
             shell=True,
             cwd=cwd,
@@ -76,13 +118,30 @@ def run_build_cmds(cmds: List[str], variables: Dict[str, str], cwd: str) -> None
             stderr=subprocess.STDOUT,
             text=True,
         )
-        if result.stdout.strip():
-            for line in result.stdout.strip().splitlines():
-                print(f"    {line}")
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"build command failed (exit {result.returncode}): {expanded}"
-            )
+        assert proc.stdout is not None
+
+        buf: Deque[str] = deque(maxlen=BUILD_LOG_LINES)
+        lines_on_screen: int = 0
+
+        for line in proc.stdout:
+            buf.append(line.rstrip("\n"))
+
+            clear_lines(lines_on_screen)
+
+            lines_on_screen = len(buf)
+            for buf_line in buf:
+                display: str = buf_line[:max_line_len]
+                sys.stdout.write(f"  {DIM}    {display}{RESET}\n")
+            sys.stdout.flush()
+
+        returncode: int = proc.wait()
+
+        clear_lines(lines_on_screen)
+
+        if returncode != 0:
+            for buf_line in buf:
+                print(f"  {DIM}    {buf_line}{RESET}")
+            raise RuntimeError(f"build command failed (exit {returncode}): {expanded}")
 
 
 def update_package(
@@ -97,19 +156,19 @@ def update_package(
     artifact: Optional[str] = pkg_config.get("artifact")
     bin_name: str = pkg_config.get("bin", name)
 
-    print(f"\n--- {name} ({repo_name}) ---")
+    print(f"\n{BOLD}{CYAN}── {name} {RESET}{DIM}({repo_name}){RESET}")
 
     current: Dict[str, Any] = lock.get("packages", {}).get(name, {})
     current_version: str = current.get("version", "none")
-    print(f"  installed: {current_version}")
+    print(f"  {DIM}installed{RESET}  {current_version}")
 
     repo = g.get_repo(repo_name)
     latest = repo.get_latest_release()
     latest_version: str = latest.tag_name.lstrip("v")
-    print(f"  latest:    {latest_version}")
+    print(f"  {DIM}latest{RESET}     {latest_version}")
 
     if current_version == latest_version and not force:
-        print("  already up to date")
+        print(f"  {GREEN}[OK]{RESET} already up to date")
         return
 
     if artifact == "source":
@@ -122,31 +181,34 @@ def update_package(
         asset = find_asset(latest.get_assets(), resolved)
         if not asset:
             kind: str = f"artifact '{resolved}'" if resolved else "appimage"
-            print(f"  error: no {kind} found in release assets", file=sys.stderr)
+            print(
+                f"  {RED}[F]{RESET} no {kind} found in release assets", file=sys.stderr
+            )
             return
         download_url = asset.browser_download_url
         artifact_name = asset.name
 
-    print(f"  artifact:  {artifact_name}")
+    print(f"  {DIM}artifact{RESET}   {artifact_name}")
     answer: str = input(
-        f"  update {name} from {current_version} to {latest_version}? [y/N] "
+        f"  {YELLOW}update {name} from {current_version} to {latest_version}? [y/N]{RESET} "
     )
     if answer.lower() != "y":
-        print("  skipped")
+        print(f"  {YELLOW}[SKIP]{RESET} skipped")
         return
 
     build_cmds: Optional[List[str]] = pkg_config.get("build_cmds")
 
-    print(f"  downloading {artifact_name}...")
     resp: requests.Response = requests.get(download_url, stream=True)
     resp.raise_for_status()
 
     install_dir.mkdir(parents=True, exist_ok=True)
 
     if build_cmds:
-        with tempfile.TemporaryDirectory(prefix=f"update_pkg_{name}_") as tmpdir:
+        with tempfile.TemporaryDirectory(prefix=f"pack_{name}_") as tmpdir:
             artifact_path: Path = Path(tmpdir) / artifact_name
-            download_to(resp, artifact_path)
+            with yaspin(text=f"downloading {artifact_name}...", color="cyan") as sp:
+                download_to(resp, artifact_path)
+            print(f"  {GREEN}[OK]{RESET} downloaded {artifact_name}")
 
             variables: Dict[str, str] = {
                 "artifact": str(artifact_path),
@@ -165,8 +227,10 @@ def update_package(
             target.rename(backup)
 
         try:
-            download_to(resp, target)
-            target.chmod(0o755)
+            with yaspin(text=f"downloading {artifact_name}...", color="cyan") as sp:
+                download_to(resp, target)
+                target.chmod(0o755)
+            print(f"  {GREEN}[OK]{RESET} downloaded {artifact_name}")
         except Exception:
             if backup.exists():
                 backup.rename(target)
@@ -183,7 +247,7 @@ def update_package(
         "url": download_url,
     }
 
-    print(f"  installed {name} v{latest_version}")
+    print(f"  {GREEN}[OK]{RESET} installed {name} v{latest_version}")
 
 
 def cmd_update(args: argparse.Namespace, config: PkgConfig) -> None:
@@ -193,17 +257,17 @@ def cmd_update(args: argparse.Namespace, config: PkgConfig) -> None:
     ).expanduser()
     packages: Dict[str, PkgConfig] = config.get("packages", {})
 
-    g: Github = Github()
+    g: Github = get_github_client()
     targets: List[str] = args.packages if args.packages else list(packages.keys())
 
     for name in targets:
         if name not in packages:
-            print(f"unknown package: {name}", file=sys.stderr)
+            print(f"  {RED}[F]{RESET} unknown package: {name}", file=sys.stderr)
             continue
         try:
             update_package(name, packages[name], lock, g, install_dir, force=args.force)
         except Exception as e:
-            print(f"  error: {e}", file=sys.stderr)
+            print(f"  {RED}[F]{RESET} {e}", file=sys.stderr)
 
     save_pkg_lock(lock)
 
@@ -217,9 +281,12 @@ def cmd_list(config: PkgConfig) -> None:
         if name in lock_pkgs:
             info: Dict[str, Any] = lock_pkgs[name]
             ts: str = info.get("installed_at", "unknown")
-            print(f"  {name}: v{info['version']} (installed {ts})")
+            print(
+                f"  {CYAN}{name}{RESET}: {GREEN}v{info['version']}{RESET}"
+                f" {DIM}(installed {ts}){RESET}"
+            )
         else:
-            print(f"  {name}: not installed")
+            print(f"  {CYAN}{name}{RESET}: {DIM}not installed{RESET}")
 
 
 def cmd_status(config: PkgConfig) -> None:
@@ -227,18 +294,32 @@ def cmd_status(config: PkgConfig) -> None:
     packages: Dict[str, PkgConfig] = config.get("packages", {})
     lock_pkgs: Dict[str, Any] = lock.get("packages", {})
 
-    g: Github = Github()
+    g: Github = get_github_client()
 
-    for name, pkg_config in packages.items():
-        current_version: str = lock_pkgs.get(name, {}).get("version", "none")
-        try:
-            repo = g.get_repo(pkg_config["repo"])
-            latest = repo.get_latest_release()
-            latest_version: str = latest.tag_name.lstrip("v")
-            marker: str = "*" if current_version != latest_version else " "
-            print(f"  {marker} {name}: {current_version} -> {latest_version}")
-        except Exception as e:
-            print(f"    {name}: {current_version} (error checking: {e})")
+    StatusResult = Tuple[str, str, Optional[str], Optional[Exception]]
+    results: List[StatusResult] = []
+
+    with yaspin(text="checking for updates...", color="cyan") as sp:
+        for name, pkg_config in packages.items():
+            current_version: str = lock_pkgs.get(name, {}).get("version", "none")
+            try:
+                repo = g.get_repo(pkg_config["repo"])
+                latest = repo.get_latest_release()
+                latest_version: str = latest.tag_name.lstrip("v")
+                results.append((name, current_version, latest_version, None))
+            except Exception as e:
+                results.append((name, current_version, None, e))
+
+    for name, current, latest, err in results:
+        if err:
+            print(f"  {RED}[F]{RESET} {name}: {current} {DIM}(error: {err}){RESET}")
+        elif current != latest:
+            print(
+                f"  {YELLOW}[NEW]{RESET} {BOLD}{name}{RESET}:"
+                f" {current} {YELLOW}->{RESET} {latest}"
+            )
+        else:
+            print(f"  {GREEN}[OK]{RESET} {name}: {GREEN}{current}{RESET}")
 
 
 def main() -> None:
@@ -258,11 +339,11 @@ package config (~/pkg.json):
                   available variables: {artifact} {install_dir} {bin} {version} {tmpdir}
 
 examples:
-  update_pkg                      update all packages
-  update_pkg update nvim tmux     update specific packages
-  update_pkg update -f nvim       force re-download even if up to date
-  update_pkg status               check which packages have updates available
-  update_pkg list                 show installed versions from the lockfile""",
+  pack                      update all packages
+  pack update nvim tmux     update specific packages
+  pack update -f nvim       force re-download even if up to date
+  pack status               check which packages have updates available
+  pack list                 show installed versions from the lockfile""",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     sub = parser.add_subparsers(dest="command")
@@ -299,8 +380,8 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\naborted")
+        print(f"\n{DIM}aborted{RESET}")
         sys.exit(130)
     except Exception as e:
-        print(f"error: {e}", file=sys.stderr)
+        print(f"{RED}[F]{RESET} {e}", file=sys.stderr)
         sys.exit(1)
