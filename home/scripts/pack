@@ -14,7 +14,7 @@ from typing import IO, Any, Deque, Dict, Iterable, List, Optional, Tuple
 
 import requests
 from colored import attr, fg
-from github import Github
+from github import Auth, Github
 from yaspin import yaspin
 
 PkgConfig = Dict[str, Any]
@@ -43,7 +43,7 @@ def get_github_client() -> Github:
     """
     token: Optional[str] = os.environ.get("GITHUB_TOKEN")
     if token:
-        return Github(token)
+        return Github(auth=Auth.Token(token))
 
     try:
         result: subprocess.CompletedProcess[str] = subprocess.run(
@@ -52,7 +52,7 @@ def get_github_client() -> Github:
             text=True,
         )
         if result.returncode == 0 and result.stdout.strip():
-            return Github(result.stdout.strip())
+            return Github(auth=Auth.Token(result.stdout.strip()))
     except FileNotFoundError:
         pass
 
