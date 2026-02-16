@@ -1,7 +1,0 @@
-#!/bin/bash
-#this is Luke's Script I have just made some changes like removing the arguments part
-chosenEmoji=$(cut -d ';' -f1 ~/scripts/emojis.txt | dmenu -i -F -l 10 | sed "s/ .*//") &&
-	[ -z "$chosenEmoji" ] && exit
-
-printf "$chosenEmoji" | xclip -selection clipboard
-notify-send "'$chosenEmoji' copied to clipboard." &

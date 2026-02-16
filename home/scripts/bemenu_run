@@ -1,3 +1,0 @@
-#!/bin/bash
-# bemenu-run -i -p ">" --hp 7 --tb "$BEMENU_PRIMARY" --tf "$BEMENU_TITLE_FOREGROUND" --hf "$BEMENU_PRIMARY" --ab "$BEMENU_BACKGROUND" --fb "$BEMENU_BACKGROUND" --nb "$BEMENU_BACKGROUND" --bdr "$BEMENU_BACKGROUND"
-bemenu-run -i -p ">:[ " --hp 7 --tb "$BEMENU_PRIMARY" --tf "$BEMENU_TITLE_FOREGROUND" --hf "$BEMENU_PRIMARY" --ab "$BEMENU_BACKGROUND" --fb "$BEMENU_BACKGROUND" --nb "$BEMENU_BACKGROUND" -c -l 5 -W 0.4 --fixed-height --bdr "$BEMENU_BACKGROUND" -B 10

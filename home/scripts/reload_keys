@@ -1,5 +1,0 @@
-#!/bin/bash
-
-notify-send "Reloading Keys..." "Please Wait.." -i /D/Downloads/keyboard.png &&
-	xmodmap /home/aditya/.Xmodmap
-# xset r rate 300 50
