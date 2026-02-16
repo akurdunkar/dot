@@ -167,6 +167,7 @@ def update_package(
     install_dir: Path,
     log: IO[str],
     force: bool = False,
+    yes: bool = False,
 ) -> None:
     repo_name: str = pkg_config["repo"]
     artifact: Optional[str] = pkg_config.get("artifact")
@@ -205,12 +206,14 @@ def update_package(
         artifact_name = asset.name
 
     print(f"  {DIM}artifact{RESET}   {artifact_name}")
-    answer: str = input(
-        f"  {YELLOW}update {name} from {current_version} to {latest_version}? [y/N]{RESET} "
-    )
-    if answer.lower() != "y":
-        print(f"  {YELLOW}[SKIP]{RESET} skipped")
-        return
+    if not yes:
+        answer: str = input(
+            f"  {YELLOW}update {name} from {current_version}"
+            f" to {latest_version}? [y/N]{RESET} "
+        )
+        if answer.lower() != "y":
+            print(f"  {YELLOW}[SKIP]{RESET} skipped")
+            return
 
     build_cmds: Optional[List[str]] = pkg_config.get("build_cmds")
 
@@ -292,6 +295,7 @@ def cmd_update(args: argparse.Namespace, config: PkgConfig) -> None:
                     install_dir,
                     log=log,
                     force=args.force,
+                    yes=args.yes,
                 )
             except Exception as e:
                 print(f"  {RED}[F]{RESET} {e}", file=sys.stderr)
@@ -369,6 +373,7 @@ examples:
   pack                      update all packages
   pack update nvim tmux     update specific packages
   pack update -f nvim       force re-download even if up to date
+  pack update -y            update all without prompts
   pack status               check which packages have updates available
   pack list                 show installed versions from the lockfile""",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -385,6 +390,12 @@ examples:
         action="store_true",
         help="re-download even if already up to date",
     )
+    p_update.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="skip confirmation prompts",
+    )
 
     sub.add_parser("list", help="show installed packages and versions from ~/pkg.lock")
     sub.add_parser("status", help="check for available updates without installing")
@@ -396,6 +407,7 @@ examples:
         if args.command is None:
             args.packages = []
             args.force = False
+            args.yes = False
         cmd_update(args, config)
     elif args.command == "list":
         cmd_list(config)
