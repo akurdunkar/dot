@@ -44,6 +44,16 @@
                 "tar xzf {artifact} --strip-components=1",
                 "pip install --user --break-system-packages ."
             ]
+        },
+        "pyenv": {
+            "repo": "pyenv/pyenv",
+            "artifact": "source",
+            "bin": "pyenv",
+            "build_cmds": [
+                "mkdir ~/.pyenv",
+                "tar xzf {artifact} --strip-components=1 -C ~/.pyenv",
+                "cd ~/.pyenv && src/configure && make -C src"
+            ]
         }
     }
 }
