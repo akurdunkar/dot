@@ -123,16 +123,22 @@ def run_build_cmds(cmds: List[str], variables: Dict[str, str], cwd: str) -> None
         buf: Deque[str] = deque(maxlen=BUILD_LOG_LINES)
         lines_on_screen: int = 0
 
-        for line in proc.stdout:
-            buf.append(line.rstrip("\n"))
+        try:
+            for line in proc.stdout:
+                buf.append(line.rstrip("\n"))
 
+                clear_lines(lines_on_screen)
+
+                lines_on_screen = len(buf)
+                for buf_line in buf:
+                    display: str = buf_line[:max_line_len]
+                    sys.stdout.write(f"  {DIM}    {display}{RESET}\n")
+                sys.stdout.flush()
+        except BaseException:
+            proc.terminate()
+            proc.wait()
             clear_lines(lines_on_screen)
-
-            lines_on_screen = len(buf)
-            for buf_line in buf:
-                display: str = buf_line[:max_line_len]
-                sys.stdout.write(f"  {DIM}    {display}{RESET}\n")
-            sys.stdout.flush()
+            raise
 
         returncode: int = proc.wait()
 
@@ -198,15 +204,14 @@ def update_package(
 
     build_cmds: Optional[List[str]] = pkg_config.get("build_cmds")
 
-    resp: requests.Response = requests.get(download_url, stream=True)
-    resp.raise_for_status()
-
     install_dir.mkdir(parents=True, exist_ok=True)
 
     if build_cmds:
         with tempfile.TemporaryDirectory(prefix=f"pack_{name}_") as tmpdir:
             artifact_path: Path = Path(tmpdir) / artifact_name
-            with yaspin(text=f"downloading {artifact_name}...", color="cyan") as sp:
+            with yaspin(text=f"downloading {artifact_name}...", color="cyan"):
+                resp: requests.Response = requests.get(download_url, stream=True)
+                resp.raise_for_status()
                 download_to(resp, artifact_path)
             print(f"  {GREEN}[OK]{RESET} downloaded {artifact_name}")
 
@@ -227,7 +232,9 @@ def update_package(
             target.rename(backup)
 
         try:
-            with yaspin(text=f"downloading {artifact_name}...", color="cyan") as sp:
+            with yaspin(text=f"downloading {artifact_name}...", color="cyan"):
+                resp = requests.get(download_url, stream=True)
+                resp.raise_for_status()
                 download_to(resp, target)
                 target.chmod(0o755)
             print(f"  {GREEN}[OK]{RESET} downloaded {artifact_name}")
@@ -299,7 +306,7 @@ def cmd_status(config: PkgConfig) -> None:
     StatusResult = Tuple[str, str, Optional[str], Optional[Exception]]
     results: List[StatusResult] = []
 
-    with yaspin(text="checking for updates...", color="cyan") as sp:
+    with yaspin(text="checking for updates...", color="cyan"):
         for name, pkg_config in packages.items():
             current_version: str = lock_pkgs.get(name, {}).get("version", "none")
             try:
