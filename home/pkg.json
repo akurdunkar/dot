@@ -1,31 +1,40 @@
 {
-  "install_dir": "~/.local/bin",
-  "packages": {
-    "nvim": {
-      "repo": "neovim/neovim",
-      "artifact": "nvim-linux-x86_64.appimage",
-      "bin": "nvim"
-    },
-    "tmux": {
-      "repo": "tmux/tmux",
-      "artifact": "tmux-{version}.tar.gz",
-      "bin": "tmux",
-      "build_cmds": [
-        "tar xzf {artifact} --strip-components=1",
-        "./configure --prefix=$HOME/.local --bindir={install_dir}",
-        "make",
-        "make install"
-      ]
-    },
-    "nvm": {
-      "repo": "nvm-sh/nvm",
-      "artifact": "source",
-      "bin": "nvm",
-      "build_cmds": [
-        "tar xzf {artifact} --strip-components=1",
-        "bash ./install.sh",
-        ". $NVM_DIR/nvm.sh && nvm install node"
-      ]
+    "install_dir": "~/.local/bin",
+    "packages": {
+        "nvim": {
+            "repo": "neovim/neovim",
+            "artifact": "nvim-linux-x86_64.appimage",
+            "bin": "nvim"
+        },
+        "tmux": {
+            "repo": "tmux/tmux",
+            "artifact": "tmux-{version}.tar.gz",
+            "bin": "tmux",
+            "build_cmds": [
+                "tar xzf {artifact} --strip-components=1",
+                "./configure --prefix=$HOME/.local --bindir={install_dir}",
+                "make",
+                "make install"
+            ]
+        },
+        "nvm": {
+            "repo": "nvm-sh/nvm",
+            "artifact": "source",
+            "bin": "nvm",
+            "build_cmds": [
+                "tar xzf {artifact} --strip-components=1",
+                "bash ./install.sh",
+                ". $NVM_DIR/nvm.sh && nvm install node"
+            ]
+        },
+        "z.sh": {
+            "repo": "rupa/z",
+            "artifact": "source",
+            "bin": "z",
+            "build_cmds": [
+                "tar xzf {artifact} --strip-components=1",
+                "cp -vf z.sh $HOME"
+            ]
+        }
     }
-  }
 }

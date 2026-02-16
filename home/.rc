@@ -25,25 +25,17 @@ __source__ ".env"
 __source__ ".alias"
 __source__ ".rc" priv-only
 
-#-(Create files/folders that don't exist but are required )-------------------
+#-(Create directories that might not exist but are required )-------------------
 
-# Z script
-Z_SH_PATH="$HOME/z.sh"
-Z_SH_LINK="https://raw.githubusercontent.com/rupa/z/master/z.sh"
-if ! [[ -r "$Z_SH_PATH" ]]; then
-	wget "$Z_SH_LINK" -O "$Z_SH_PATH"
-else
-	# shellcheck source=/dev/null
-	source "$Z_SH_PATH"
-fi
-
-# Create directories that don't exist
 ! [[ -d "$VENV_DIR" ]] && mkdir "$VENV_DIR"
 ! [[ -d "$CODE_DIR" ]] && mkdir "$CODE_DIR"
 ! [[ -d "$NOTES_DIR" ]] && mkdir "$NOTES_DIR"
 ! [[ -d "$STASH_DIR" ]] && mkdir "$STASH_DIR"
 
 #-----------------------------------------------------------------------------
+
+# Source Z script
+[[ -r "$Z_SH_PATH" ]] && source "$Z_SH_PATH"
 
 source $HOME/.functions
 source $HOME/.completions
