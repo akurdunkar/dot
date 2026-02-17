@@ -16,7 +16,7 @@
             "repo": "tmux/tmux",
             "artifact": "tmux-{version}.tar.gz",
             "bin": "tmux",
-            "build_cmds": [
+            "cmds": [
                 "tar xzf {artifact} --strip-components=1",
                 "./configure --prefix=$HOME/.local --bindir={install_dir}",
                 "make",
@@ -27,7 +27,7 @@
             "repo": "nvm-sh/nvm",
             "artifact": "source",
             "bin": "nvm",
-            "build_cmds": [
+            "cmds": [
                 "tar xzf {artifact} --strip-components=1",
                 "bash ./install.sh",
                 ". $NVM_DIR/nvm.sh && nvm install node"
@@ -37,7 +37,7 @@
             "repo": "rupa/z",
             "artifact": "source",
             "bin": "z",
-            "build_cmds": [
+            "cmds": [
                 "tar xzf {artifact} --strip-components=1",
                 "cp -vf z.sh $HOME"
             ]
@@ -46,7 +46,7 @@
             "repo": "mesonbuild/meson",
             "artifact": "meson-{version}.tar.gz",
             "bin": "meson",
-            "build_cmds": [
+            "cmds": [
                 "tar xzf {artifact} --strip-components=1",
                 "pip install --user --break-system-packages ."
             ]
@@ -55,7 +55,7 @@
             "repo": "pyenv/pyenv",
             "artifact": "source",
             "bin": "pyenv",
-            "build_cmds": [
+            "cmds": [
                 "mkdir ~/.pyenv",
                 "tar xzf {artifact} --strip-components=1 -C ~/.pyenv",
                 "cd ~/.pyenv && src/configure && make -C src"
@@ -65,7 +65,7 @@
             "repo": "rust-lang/rustup",
             "artifact": "source",
             "bin": "rustup",
-            "build_cmds": [
+            "cmds": [
                 "tar xzf {artifact} --strip-components=1",
                 "bash rustup-init.sh -y --no-modify-path"
             ]

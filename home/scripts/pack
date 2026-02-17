@@ -374,7 +374,7 @@ def update_package(
             return
 
     pre_cmds: Optional[List[str]] = pkg_config.get("pre")
-    build_cmds: Optional[List[str]] = pkg_config.get("build_cmds")
+    build_cmds: Optional[List[str]] = pkg_config.get("cmds")
 
     install_dir.mkdir(parents=True, exist_ok=True)
 
@@ -535,7 +535,7 @@ package config (~/pkg.json):
                   before this package; missing deps cause the package to be skipped
     pre           array of shell commands to run before download/build
                   available variables: {install_dir} {bin} {version}
-    build_cmds    array of shell commands to run after downloading to /tmp
+    cmds          array of shell commands to run after downloading to /tmp
                   available variables: {artifact} {install_dir} {bin} {version} {tmpdir}
 
 examples:
