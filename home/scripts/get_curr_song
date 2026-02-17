@@ -1,7 +1,7 @@
 #!/bin/bash
 clr="$RED_COLOR"
 ____paused() {
-	printf "^c$BLUE_COLOR^ ^c$WHITE_COLOR^"
+	printf "^c$YELLOW_COLOR^ ^c$WHITE_COLOR^"
 }
 
 ____mpc() {
