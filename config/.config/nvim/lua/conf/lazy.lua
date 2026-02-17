@@ -27,7 +27,6 @@ require("lazy").setup({
     -- Color scheme
     'aditya-K2/scruber.vim',
 
-    { 'iamcco/markdown-preview.nvim',           build = 'cd app && yarn install' },
     {
         'lewis6991/gitsigns.nvim',
         config = function()
