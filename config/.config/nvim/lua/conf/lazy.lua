@@ -46,7 +46,7 @@ require("lazy").setup({
         build = ':TSUpdate',
         config = function()
             -- treesitter highlighting
-            require 'nvim-treesitter.configs'.setup {
+            require 'nvim-treesitter.config'.setup {
                 ensure_installed = {
                     "go", "haskell",
                     "cpp", "c",
