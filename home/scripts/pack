@@ -14,16 +14,11 @@ from typing import IO, Any, Deque, Dict, Iterable, List, Optional, Tuple
 
 import requests
 from colored import attr, fg
-from github import Auth, Github
+from github import Auth, Github, UnknownObjectException
 from yaspin import yaspin
 
 PkgConfig = Dict[str, Any]
 LockData = Dict[str, Any]
-
-PKG_JSON: Path = Path.home() / "pkg.json"
-PKG_LOCK: Path = Path.home() / "pkg.lock"
-DEFAULT_INSTALL_DIR: Path = Path.home() / ".local" / "bin"
-BUILD_LOG: Path = Path("/tmp/pack.build.log")
 
 DIM: str = attr("dim")
 GREEN: str = fg("green")
@@ -33,7 +28,25 @@ RED: str = fg("red")
 BOLD: str = attr("bold")
 RESET: str = attr("reset")
 
+PKG_JSON: Path = Path.home() / "pkg.json"
+PKG_LOCK: Path = Path.home() / "pkg.lock"
+DEFAULT_INSTALL_DIR: Path = Path.home() / ".local" / "bin"
+BUILD_LOG: Path = Path("/tmp/pack.build.log")
+
 BUILD_LOG_LINES: int = 15
+HTTP_TIMEOUT: int = 30
+
+
+class PackageError(Exception):
+    """Raised when a package operation fails in a recoverable way."""
+
+
+def get_auth_token(g: Github) -> Optional[str]:
+    """Extract the raw token string from a Github client, if authenticated."""
+    auth = getattr(g, "auth", None)
+    if auth and hasattr(auth, "token"):
+        return auth.token  # type: ignore[union-attr]
+    return None
 
 
 def get_github_client() -> Github:
@@ -59,12 +72,43 @@ def get_github_client() -> Github:
     return Github()
 
 
+def validate_config(config: PkgConfig) -> None:
+    """Validate the structure of pkg.json and exit on errors."""
+    packages = config.get("packages")
+    if packages is None:
+        print(f"  {RED}[F]{RESET} pkg.json: missing 'packages' key", file=sys.stderr)
+        sys.exit(1)
+    if not isinstance(packages, dict):
+        print(
+            f"  {RED}[F]{RESET} pkg.json: 'packages' must be an object",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    for name, pkg in packages.items():
+        if "repo" not in pkg:
+            print(
+                f"  {RED}[F]{RESET} pkg.json: '{name}' missing required 'repo' key",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        for req in pkg.get("requires", []):
+            if req not in packages:
+                print(
+                    f"  {RED}[F]{RESET} pkg.json: '{name}' requires"
+                    f" unknown package '{req}'",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+
+
 def load_pkg_json() -> PkgConfig:
     if not PKG_JSON.exists():
         print(f"  {RED}[F]{RESET} {PKG_JSON} not found", file=sys.stderr)
         sys.exit(1)
     with open(PKG_JSON) as f:
-        return json.load(f)
+        config: PkgConfig = json.load(f)
+    validate_config(config)
+    return config
 
 
 def load_pkg_lock() -> LockData:
@@ -153,7 +197,7 @@ def get_latest_release(repo: Any) -> Any:
     """
     try:
         return repo.get_latest_release()
-    except Exception:
+    except UnknownObjectException:
         for release in repo.get_releases():
             if not release.draft and not release.prerelease:
                 return release
@@ -179,6 +223,41 @@ def download_to(resp: requests.Response, dest: Path) -> None:
     with open(dest, "wb") as f:
         for chunk in resp.iter_content(chunk_size=8192):
             f.write(chunk)
+
+
+def resolve_artifact(
+    latest: Any, artifact: Optional[str], name: str, version: str
+) -> Tuple[str, str]:
+    """Resolve the download URL and artifact filename from a release.
+
+    Returns (download_url, artifact_name).  Raises PackageError if no
+    matching asset is found.
+    """
+    if artifact == "source":
+        return latest.tarball_url, f"{name}-{version}.tar.gz"
+
+    resolved: Optional[str] = artifact.format(version=version) if artifact else None
+    asset = find_asset(latest.get_assets(), resolved)
+    if not asset:
+        kind: str = f"artifact '{resolved}'" if resolved else "appimage"
+        raise PackageError(f"no {kind} found in release assets")
+    return asset.browser_download_url, asset.name
+
+
+def download_with_spinner(
+    url: str, dest: Path, label: str, auth_token: Optional[str] = None
+) -> None:
+    """Download a file with a spinner, optional auth, and timeout."""
+    headers: Dict[str, str] = {}
+    if auth_token:
+        headers["Authorization"] = f"token {auth_token}"
+    with yaspin(text=f"downloading {label}...", color="cyan"):
+        resp: requests.Response = requests.get(
+            url, stream=True, headers=headers, timeout=HTTP_TIMEOUT
+        )
+        resp.raise_for_status()
+        download_to(resp, dest)
+    print(f"  {GREEN}[OK]{RESET} downloaded {label}")
 
 
 def clear_lines(n: int) -> None:
@@ -257,49 +336,32 @@ def update_package(
     repo_name: str = pkg_config["repo"]
     artifact: Optional[str] = pkg_config.get("artifact")
     bin_name: str = pkg_config.get("bin", name)
+    auth_token: Optional[str] = get_auth_token(g)
 
     print(f"\n{BOLD}{CYAN}── {name} {RESET}{DIM}({repo_name}){RESET}")
 
     requires: List[str] = pkg_config.get("requires", [])
     if requires:
-        lock_pkgs: Dict[str, Any] = lock.get("packages", {})
-        missing: List[str] = [r for r in requires if r not in lock_pkgs]
+        missing: List[str] = [r for r in requires if r not in lock["packages"]]
         if missing:
-            print(
-                f"  {RED}[F]{RESET} missing required packages: {', '.join(missing)}",
-                file=sys.stderr,
-            )
-            return
+            raise PackageError(f"missing required packages: {', '.join(missing)}")
 
-    current: Dict[str, Any] = lock.get("packages", {}).get(name, {})
+    current: Dict[str, Any] = lock["packages"].get(name, {})
     current_version: str = current.get("version", "none")
     print(f"  {DIM}installed{RESET}  {current_version}")
 
     repo = g.get_repo(repo_name)
     latest = get_latest_release(repo)
-    latest_version: str = latest.tag_name.lstrip("v")
+    latest_version: str = latest.tag_name.removeprefix("v")
     print(f"  {DIM}latest{RESET}     {latest_version}")
 
     if current_version == latest_version and not force:
         print(f"  {GREEN}[OK]{RESET} already up to date")
         return
 
-    if artifact == "source":
-        download_url: str = latest.tarball_url
-        artifact_name: str = f"{name}-{latest_version}.tar.gz"
-    else:
-        resolved: Optional[str] = (
-            artifact.format(version=latest_version) if artifact else None
-        )
-        asset = find_asset(latest.get_assets(), resolved)
-        if not asset:
-            kind: str = f"artifact '{resolved}'" if resolved else "appimage"
-            print(
-                f"  {RED}[F]{RESET} no {kind} found in release assets", file=sys.stderr
-            )
-            return
-        download_url = asset.browser_download_url
-        artifact_name = asset.name
+    download_url, artifact_name = resolve_artifact(
+        latest, artifact, name, latest_version
+    )
 
     print(f"  {DIM}artifact{RESET}   {artifact_name}")
     if not yes:
@@ -330,11 +392,9 @@ def update_package(
     if build_cmds:
         with tempfile.TemporaryDirectory(prefix=f"pack_{name}_") as tmpdir:
             artifact_path: Path = Path(tmpdir) / artifact_name
-            with yaspin(text=f"downloading {artifact_name}...", color="cyan"):
-                resp: requests.Response = requests.get(download_url, stream=True)
-                resp.raise_for_status()
-                download_to(resp, artifact_path)
-            print(f"  {GREEN}[OK]{RESET} downloaded {artifact_name}")
+            download_with_spinner(
+                download_url, artifact_path, artifact_name, auth_token
+            )
 
             variables: Dict[str, str] = {
                 "artifact": str(artifact_path),
@@ -354,12 +414,8 @@ def update_package(
             target.rename(backup)
 
         try:
-            with yaspin(text=f"downloading {artifact_name}...", color="cyan"):
-                resp = requests.get(download_url, stream=True)
-                resp.raise_for_status()
-                download_to(resp, target)
-                target.chmod(0o755)
-            print(f"  {GREEN}[OK]{RESET} downloaded {artifact_name}")
+            download_with_spinner(download_url, target, artifact_name, auth_token)
+            target.chmod(0o755)
         except Exception:
             if backup.exists():
                 backup.rename(target)
@@ -368,7 +424,7 @@ def update_package(
         if backup.exists():
             backup.unlink()
 
-    lock.setdefault("packages", {})[name] = {
+    lock["packages"][name] = {
         "version": latest_version,
         "artifact": artifact_name,
         "repo": repo_name,
@@ -415,7 +471,7 @@ def cmd_update(args: argparse.Namespace, config: PkgConfig) -> None:
 def cmd_list(config: PkgConfig) -> None:
     lock: LockData = load_pkg_lock()
     packages: Dict[str, PkgConfig] = config.get("packages", {})
-    lock_pkgs: Dict[str, Any] = lock.get("packages", {})
+    lock_pkgs: Dict[str, Any] = lock["packages"]
 
     for name in packages:
         if name in lock_pkgs:
@@ -432,7 +488,7 @@ def cmd_list(config: PkgConfig) -> None:
 def cmd_status(config: PkgConfig) -> None:
     lock: LockData = load_pkg_lock()
     packages: Dict[str, PkgConfig] = config.get("packages", {})
-    lock_pkgs: Dict[str, Any] = lock.get("packages", {})
+    lock_pkgs: Dict[str, Any] = lock["packages"]
 
     g: Github = get_github_client()
 
@@ -445,7 +501,7 @@ def cmd_status(config: PkgConfig) -> None:
             try:
                 repo = g.get_repo(pkg_config["repo"])
                 latest = get_latest_release(repo)
-                latest_version: str = latest.tag_name.lstrip("v")
+                latest_version: str = latest.tag_name.removeprefix("v")
                 results.append((name, current_version, latest_version, None))
             except Exception as e:
                 results.append((name, current_version, None, e))

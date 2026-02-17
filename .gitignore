@@ -1,2 +1,3 @@
 gomp
 *.o
+__pycache__
