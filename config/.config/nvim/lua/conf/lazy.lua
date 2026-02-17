@@ -11,6 +11,13 @@ if not vim.loop.fs_stat(lazypath) then
 end
 vim.opt.rtp:prepend(lazypath)
 
+local treesitter_file_pattern = {
+    "cpp", "c",
+    "lua", "vim", "vimdoc",
+    "json", "yaml",
+    "python", "go"
+}
+
 require("lazy").setup({
     'tpope/vim-commentary',
     {
@@ -21,7 +28,7 @@ require("lazy").setup({
     },
     'dstein64/vim-startuptime',
 
-    { 'junegunn/fzf',    build = function() vim.cmd('call fzf#install()') end },
+    { 'junegunn/fzf' },
     { 'junegunn/fzf.vim' },
 
     -- Color scheme
@@ -42,22 +49,19 @@ require("lazy").setup({
     -- Tree Sitter
     {
         'nvim-treesitter/nvim-treesitter',
-        build = ':TSUpdate',
+        branch = 'main',
+        lazy = false,
+        build = function()
+            require('nvim-treesitter').install(treesitter_file_pattern):wait(300000)
+        end,
         config = function()
-            -- treesitter highlighting
-            require 'nvim-treesitter.config'.setup {
-                ensure_installed = {
-                    "go", "haskell",
-                    "cpp", "c",
-                    "lua", "vim", "vimdoc",
-                    "json", "jsonc",
-                    "python", "dart",
-                    "typescript", "javascript", "html", "css", "java"
-                },
-                highlight = { enable = true } }
+            require('nvim-treesitter').setup {}
+            vim.api.nvim_create_autocmd('FileType', {
+                pattern = treesitter_file_pattern,
+                callback = function() vim.treesitter.start() end,
+            })
         end
     },
-    { 'nvim-treesitter/playground',             cmd = "TSPlaygroundToggle" },
     { 'nvim-treesitter/nvim-treesitter-context' },
 
     -- Lsp
@@ -98,7 +102,7 @@ require("lazy").setup({
 
     'aditya-K2/spellfloat',
 
-    { 'fatih/vim-go', ft = "go" },
+    { 'fatih/vim-go',                           ft = "go" },
 
     --Maximizer
     'szw/vim-maximizer',
