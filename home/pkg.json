@@ -4,7 +4,13 @@
         "nvim": {
             "repo": "neovim/neovim",
             "artifact": "nvim-linux-x86_64.appimage",
-            "bin": "nvim"
+            "bin": "nvim",
+            "pre": [
+                "cargo install --locked tree-sitter-cli"
+            ],
+            "requires": [
+                "rustup"
+            ]
         },
         "tmux": {
             "repo": "tmux/tmux",
@@ -53,6 +59,15 @@
                 "mkdir ~/.pyenv",
                 "tar xzf {artifact} --strip-components=1 -C ~/.pyenv",
                 "cd ~/.pyenv && src/configure && make -C src"
+            ]
+        },
+        "rustup": {
+            "repo": "rust-lang/rustup",
+            "artifact": "source",
+            "bin": "rustup",
+            "build_cmds": [
+                "tar xzf {artifact} --strip-components=1",
+                "bash rustup-init.sh -y --no-modify-path"
             ]
         }
     }

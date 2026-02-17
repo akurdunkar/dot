@@ -80,6 +80,91 @@ def save_pkg_lock(lock: LockData) -> None:
         f.write("\n")
 
 
+def topo_sort(targets: List[str], packages: Dict[str, "PkgConfig"]) -> List[str]:
+    """Return *targets* ordered so that dependencies come before dependents.
+
+    Only packages that appear in *targets* are included.  If a required
+    package is not in the target list but exists in *packages*, it is
+    pulled in automatically so it can be installed first.
+    """
+    target_set: set[str] = set(targets)
+
+    # Expand: if a target requires X and X is in packages, add X
+    queue: Deque[str] = deque(targets)
+    while queue:
+        name = queue.popleft()
+        for req in packages.get(name, {}).get("requires", []):
+            if req not in target_set and req in packages:
+                target_set.add(req)
+                queue.append(req)
+
+    in_degree: Dict[str, int] = {n: 0 for n in target_set}
+    dependents: Dict[str, List[str]] = {n: [] for n in target_set}
+
+    for name in target_set:
+        for req in packages.get(name, {}).get("requires", []):
+            if req in target_set:
+                in_degree[name] += 1
+                dependents[req].append(name)
+
+    ready: Deque[str] = deque(n for n in targets if in_degree.get(n, 0) == 0)
+    # Also add any pulled-in deps that aren't already queued
+    for n in target_set - set(targets):
+        if in_degree[n] == 0:
+            ready.append(n)
+
+    ordered: List[str] = []
+    while ready:
+        node = ready.popleft()
+        ordered.append(node)
+        for dep in dependents[node]:
+            in_degree[dep] -= 1
+            if in_degree[dep] == 0:
+                ready.append(dep)
+
+    if len(ordered) != len(target_set):
+        cycle = target_set - set(ordered)
+        raise RuntimeError(
+            f"dependency cycle detected among: {', '.join(sorted(cycle))}"
+        )
+
+    return ordered
+
+
+class TagShim:
+    """Minimal release-like wrapper around a Git tag."""
+
+    def __init__(self, tag: Any) -> None:
+        self.tag_name: str = tag.name
+        self.tarball_url: str = tag.tarball_url
+
+    @staticmethod
+    def get_assets() -> List[Any]:
+        return []
+
+
+def get_latest_release(repo: Any) -> Any:
+    """Return the latest release, falling back to the most recent by date.
+
+    Some repos (e.g. rustup) don't mark any release as 'latest', causing the
+    /releases/latest endpoint to 404.  In that case, fetch all releases and
+    return the most recent non-draft, non-prerelease one.  If there are no
+    releases at all, fall back to the latest tag.
+    """
+    try:
+        return repo.get_latest_release()
+    except Exception:
+        for release in repo.get_releases():
+            if not release.draft and not release.prerelease:
+                return release
+
+    tags = repo.get_tags()
+    if tags.totalCount:
+        return TagShim(tags[0])
+
+    raise RuntimeError(f"no suitable release or tag found for {repo.full_name}")
+
+
 def find_asset(assets: Iterable[Any], artifact: Optional[str]) -> Optional[Any]:
     for asset in assets:
         if artifact:
@@ -175,12 +260,23 @@ def update_package(
 
     print(f"\n{BOLD}{CYAN}── {name} {RESET}{DIM}({repo_name}){RESET}")
 
+    requires: List[str] = pkg_config.get("requires", [])
+    if requires:
+        lock_pkgs: Dict[str, Any] = lock.get("packages", {})
+        missing: List[str] = [r for r in requires if r not in lock_pkgs]
+        if missing:
+            print(
+                f"  {RED}[F]{RESET} missing required packages: {', '.join(missing)}",
+                file=sys.stderr,
+            )
+            return
+
     current: Dict[str, Any] = lock.get("packages", {}).get(name, {})
     current_version: str = current.get("version", "none")
     print(f"  {DIM}installed{RESET}  {current_version}")
 
     repo = g.get_repo(repo_name)
-    latest = repo.get_latest_release()
+    latest = get_latest_release(repo)
     latest_version: str = latest.tag_name.lstrip("v")
     print(f"  {DIM}latest{RESET}     {latest_version}")
 
@@ -215,9 +311,21 @@ def update_package(
             print(f"  {YELLOW}[SKIP]{RESET} skipped")
             return
 
+    pre_cmds: Optional[List[str]] = pkg_config.get("pre")
     build_cmds: Optional[List[str]] = pkg_config.get("build_cmds")
 
     install_dir.mkdir(parents=True, exist_ok=True)
+
+    if pre_cmds:
+        pre_vars: Dict[str, str] = {
+            "install_dir": str(install_dir),
+            "bin": bin_name,
+            "version": latest_version,
+        }
+        print(f"  {DIM}running pre commands...{RESET}")
+        log.write(f"=== {name} pre ===\n")
+        with tempfile.TemporaryDirectory(prefix=f"pack_{name}_pre_") as pre_tmpdir:
+            run_build_cmds(pre_cmds, pre_vars, cwd=pre_tmpdir, log=log)
 
     if build_cmds:
         with tempfile.TemporaryDirectory(prefix=f"pack_{name}_") as tmpdir:
@@ -280,6 +388,7 @@ def cmd_update(args: argparse.Namespace, config: PkgConfig) -> None:
 
     g: Github = get_github_client()
     targets: List[str] = args.packages if args.packages else list(packages.keys())
+    targets = topo_sort(targets, packages)
 
     with open(BUILD_LOG, "w") as log:
         for name in targets:
@@ -335,7 +444,7 @@ def cmd_status(config: PkgConfig) -> None:
             current_version: str = lock_pkgs.get(name, {}).get("version", "none")
             try:
                 repo = g.get_repo(pkg_config["repo"])
-                latest = repo.get_latest_release()
+                latest = get_latest_release(repo)
                 latest_version: str = latest.tag_name.lstrip("v")
                 results.append((name, current_version, latest_version, None))
             except Exception as e:
@@ -366,6 +475,10 @@ package config (~/pkg.json):
                     - supports {version} templating, e.g. "tmux-{version}.tar.gz"
                     - "source" to download the release source tarball
     bin           name for the installed binary (defaults to package name)
+    requires      array of package names (from pkg.json) that must be installed
+                  before this package; missing deps cause the package to be skipped
+    pre           array of shell commands to run before download/build
+                  available variables: {install_dir} {bin} {version}
     build_cmds    array of shell commands to run after downloading to /tmp
                   available variables: {artifact} {install_dir} {bin} {version} {tmpdir}
 
