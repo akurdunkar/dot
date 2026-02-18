@@ -444,6 +444,11 @@ def cmd_update(args: argparse.Namespace, config: PkgConfig) -> None:
 
     g: Github = get_github_client()
     targets: List[str] = args.packages if args.packages else list(packages.keys())
+    force_targets: set[str] = (
+        (set(args.packages) if args.packages else set(packages.keys()))
+        if args.force
+        else set()
+    )
     targets = topo_sort(targets, packages)
 
     with open(BUILD_LOG, "w") as log:
@@ -459,7 +464,7 @@ def cmd_update(args: argparse.Namespace, config: PkgConfig) -> None:
                     g,
                     install_dir,
                     log=log,
-                    force=args.force,
+                    force=name in force_targets,
                     yes=args.yes,
                 )
             except Exception as e:
