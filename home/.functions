@@ -13,7 +13,7 @@ fd_command() {
 }
 
 # Setting fd as the default source for fzf (respects .gitignore)
-FZF_DEFAULT_COMMAND="$(fd_command) --type f --strip-cwd-prefix"
+FZF_DEFAULT_COMMAND="$(fd_command) --type f --strip-cwd-prefix --hidden"
 export FZF_DEFAULT_COMMAND
 
 fzf_cmd() {
