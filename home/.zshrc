@@ -65,6 +65,7 @@ preexec() { echo -ne '\e[5 q' ;} # Use beam shape cursor for each new prompt.
 
 source $HOME/.rc
 envm
+epyenv
 
 # Prompt Starts---------------------------------------------------------------
 
