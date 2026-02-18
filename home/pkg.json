@@ -55,6 +55,9 @@
             "repo": "pyenv/pyenv",
             "artifact": "source",
             "bin": "pyenv",
+            "pre": [
+                "\\rm -rfv $PYENV_ROOT"
+            ],
             "cmds": [
                 "mkdir ~/.pyenv",
                 "tar xzf {artifact} --strip-components=1 -C ~/.pyenv",
