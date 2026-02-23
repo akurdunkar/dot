@@ -11,4 +11,5 @@
 	dunst &
 	flameshot &
 	albert &
+	copyq &
 ) 2>&1 >/tmp/dwm.log
