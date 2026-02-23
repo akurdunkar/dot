@@ -150,7 +150,7 @@ static Key keys[] = {
   { Super | ShiftMask,                         XK_equal,                    setgaps,               {.i = 0  } },
   { Super | ShiftMask,                         XK_space,                    togglefloating,        {0} },
   { Super,                                     XK_s,                        show,                  {0} },
-  { Alt,                                       XK_m,                        hide,                  {0} },
+  { Super | ShiftMask | ControlMask,           XK_m,                        hide,                  {0} },
   { Super | ShiftMask | ControlMask,           XK_q,                        quit,                  {0} },
   TAGKEYS(                                     XK_1,                        0)
   TAGKEYS(                                     XK_2,                        1)
