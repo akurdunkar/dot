@@ -4,9 +4,10 @@
 	source $HOME/.rc
 	source $HOME/.colors
 	feh --bg-scale $HOME/wall.jpg
-	picom &
+	picom --daemon
 	slstatus &
 	nm-applet &
+	blueman-applet &
 	dunst &
 	flameshot &
 	albert &
