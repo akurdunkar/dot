@@ -1,8 +1,6 @@
 [colors]
 draw_bold_text_with_bright_colors = false
 
-# Colors (Vscode)
-
 [colors.primary]
 background = "0x202124"
 foreground = "0xD4D4D4"
@@ -33,9 +31,6 @@ style = "Regular"
 [font.bold]
 family = "Ubuntu Mono"
 style = "Regular"
-
-[shell]
-program = "/bin/zsh"
 
 [window]
 opacity = 1
