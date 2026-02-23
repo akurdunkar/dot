@@ -67,7 +67,7 @@ clean:
 dist: clean
 	mkdir -p dwm-${VERSION}
 	cp -R LICENSE Makefile README config.h\
-		drw.h util.h ${SRC} dwm.png transient.c dwm-${VERSION}
+		drw.h util.h ${SRC} dwm.png dwm.sh transient.c dwm-${VERSION}
 	tar -cf dwm-${VERSION}.tar dwm-${VERSION}
 	gzip dwm-${VERSION}.tar
 	rm -rf dwm-${VERSION}
@@ -76,8 +76,10 @@ install: all
 	mkdir -p ${DESTDIR}${PREFIX}/bin
 	cp -f dwm ${DESTDIR}${PREFIX}/bin
 	chmod 755 ${DESTDIR}${PREFIX}/bin/dwm
+	cp -f dwm.sh ${DESTDIR}${PREFIX}/bin
+	chmod 755 ${DESTDIR}${PREFIX}/bin/dwm.sh
 
 uninstall:
-	rm -f ${DESTDIR}${PREFIX}/bin/dwm
+	rm -f ${DESTDIR}${PREFIX}/bin/dwm ${DESTDIR}${PREFIX}/bin/dwm.sh
 
 .PHONY: all options clean dist install uninstall
