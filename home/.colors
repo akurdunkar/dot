@@ -9,3 +9,21 @@ export GREEN_COLOR='#14ff72'
 export LIGHT_BLUE_COLOR='#b2e4ff'
 export LIGHT_GREEN_COLOR='#c2ffc1'
 export WHITE_COLOR='#ffffff'
+
+colored() {
+	local text="$1"
+	local color
+	case "$2" in
+		orange)       color="$ORANGE_COLOR" ;;
+		yellow)       color="$YELLOW_COLOR" ;;
+		light_yellow) color="$LIGHT_YELLOW_COLOR" ;;
+		red)          color="$RED_COLOR" ;;
+		blue)         color="$BLUE_COLOR" ;;
+		green)        color="$GREEN_COLOR" ;;
+		light_blue)   color="$LIGHT_BLUE_COLOR" ;;
+		light_green)  color="$LIGHT_GREEN_COLOR" ;;
+		white)        color="$WHITE_COLOR" ;;
+		*)            printf "%s" "$text"; return ;;
+	esac
+	printf "^c%s^%s^d^" "$color" "$text"
+}
