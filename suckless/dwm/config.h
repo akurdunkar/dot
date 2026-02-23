@@ -93,22 +93,20 @@ static const Layout layouts[] = {
 /* helper for spawning shell commands in the pre dwm-5.0 fashion */
 #define SHCMD(cmd) { .v = (const char*[]){ "/bin/bash", "-c", cmd, NULL } }
 
+/* spawn a command from an environment variable: spawnenv + cmdenv("MY_VAR") does eval $MY_VAR */
+#define cmdenv(envvar) { .v = envvar }
+
 #define Alt Mod1Mask
 #define Super Mod4Mask
 
 /* commands */
-static const char *termcmd[]            = { "/usr/bin/alacritty", NULL };
-static const char *webcmd[]             = { "/usr/bin/microsoft-edge", NULL };
-static const char *torrentclicmd[]      = { "t", "alacritty", "-t", "tremc" , "-e", "tremc", NULL};
-static const char *filemanagercmd[]     = { "n", "/usr/bin/thunar", NULL };
 static const char *colorchoosercmd[]    = { "c", "/usr/bin/kcolorchooser", NULL };
 
 static Key keys[] = {
 /*  modifier                                   key                          function               argument     */
-  { Super,                                     XK_u,                        spawn,                 {.v = webcmd} },
-  { Super,                                     XK_Return,                   spawn,                 {.v = termcmd } },
-  { Super,                                     XK_e,                        togglescratch,         {.v = filemanagercmd } },
-  { Super,                                     XK_q,                        togglescratch,         {.v = torrentclicmd } },
+  { Super,                                     XK_u,                        spawnenv,              cmdenv("BROWSER") },
+  { Super,                                     XK_Return,                   spawnenv,              cmdenv("TERMINAL") },
+  { Super,                                     XK_e,                        spawnenv,              cmdenv("EXPLORER") },
   { Super | ControlMask | ShiftMask,           XK_c,                        togglescratch,         {.v = colorchoosercmd } },
   { 0,                                         XF86XK_AudioPrev,            spawn,                 SHCMD("mpc prev")},
   { 0,                                         XF86XK_AudioNext,            spawn,                 SHCMD("mpc next")},
@@ -173,7 +171,6 @@ static Button buttons[] = {
     { ClkLtSymbol,          0,              Button3,        setlayout,      {.v = &layouts[2]} },
     { ClkWinTitle,          0,              Button1,        togglewin,      {0} },
     { ClkWinTitle,          0,              Button2,        zoom,           {0} },
-    { ClkStatusText,        0,              Button2,        spawn,          {.v = termcmd } },
     { ClkClientWin,         MODKEY,         Button1,        movemouse,      {0} },
     { ClkClientWin,         MODKEY,         Button2,        togglefloating, {0} },
     { ClkClientWin,         MODKEY,         Button3,        resizemouse,    {0} },

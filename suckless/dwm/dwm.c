@@ -254,6 +254,7 @@ static void showwin(Client *c);
 static void showhide(Client *c);
 static void sigchld(int unused);
 static void spawn(const Arg *arg);
+static void spawnenv(const Arg *arg);
 static void spawnscratch(const Arg *arg);
 static Monitor *systraytomon(Monitor *m);
 static void tag(const Arg *arg);
@@ -2146,6 +2147,18 @@ spawn(const Arg *arg)
 		perror(" failed");
 		exit(EXIT_SUCCESS);
 	}
+}
+
+void
+spawnenv(const Arg *arg)
+{
+	const char *cmd = getenv((const char *)arg->v);
+	if (!cmd || !*cmd) {
+		fprintf(stderr, "dwm: env var '%s' not set or empty\n", (const char *)arg->v);
+		return;
+	}
+	const Arg a = { .v = (const char *[]){ "/bin/bash", "-c", cmd, NULL } };
+	spawn(&a);
 }
 
 void spawnscratch(const Arg *arg)
