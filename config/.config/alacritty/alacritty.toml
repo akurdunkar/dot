@@ -28,6 +28,7 @@ size = 7
 
 [font.normal]
 family = "Ubuntu Mono"
+style = "Regular"
 
 [font.bold]
 family = "Ubuntu Mono"
