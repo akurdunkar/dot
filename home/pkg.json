@@ -70,7 +70,8 @@
             "bin": "rustup",
             "cmds": [
                 "tar xzf {artifact} --strip-components=1",
-                "bash rustup-init.sh -y --no-modify-path"
+                "bash rustup-init.sh -y --no-modify-path",
+                "rustup default stable"
             ]
         }
     }
