@@ -1,12 +1,30 @@
-#!/bin/bash
+#!/usr/bin/env python3
+"""
+Date/time for status bars (dwm/slstatus etc.).
+"""
 
-source $HOME/.colors
+import os
+from datetime import datetime
 
-# if [[ "$(mpc status | sed -n 2p | awk '{print $1;}')" != "[playing]" ]]; then
-#     textColor="$ORANGE_COLOR"
-# else
-__dateClr__="$RED_COLOR"
-__timeClr__="$GREEN_COLOR"
-# fi
+DATE_ICON = " "  # Clock icon (Nerd Font:  )
 
-printf "^c$BLUE_COLOR^   ^c$__dateClr__^$(date "+%a %d %b, ^c$__timeClr__^%I:%M:%S")"
+
+def main() -> None:
+    blue = os.environ.get("BLUE_COLOR", "")
+    date_color = os.environ.get("RED_COLOR", "")
+    time_color = os.environ.get("GREEN_COLOR", "")
+
+    now = datetime.now()
+    # Single strftime then split for the two color spans
+    formatted = now.strftime("%a %d %b, %I:%M:%S")
+    date_str, time_str = formatted.rsplit(", ", 1)
+    date_str += ", "
+
+    print(
+        f"^c{blue}^ {DATE_ICON} ^c{date_color}^{date_str}^c{time_color}^{time_str}",
+        end="",
+    )
+
+
+if __name__ == "__main__":
+    main()

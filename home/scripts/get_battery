@@ -8,12 +8,10 @@ import os
 import subprocess
 from pathlib import Path
 
-# --- Icons (change these in one place) ---
 NO_BATTERY_ICON = ""  # No battery / desktop (Nerd Font:   )
 BATTERY_ICON = "󰂂"  # Next to percentage (e.g. " " or "")
-CHARGING_ICON = "󰂄"  # When charging (e.g. " " or "")
+CHARGING_ICON = ""  # When charging (e.g. " " or "")
 
-# --- Config ---
 SYSFS_POWER = Path("/sys/class/power_supply")
 MIN_BATTERY_PERCENT = int(os.environ.get("MIN_BATTERY_NOTIFY", "20"))
 LOCK_FILE = Path(f"/tmp/low_battery_notified_{os.getuid()}")
@@ -21,13 +19,14 @@ LOCK_FILE = Path(f"/tmp/low_battery_notified_{os.getuid()}")
 
 def find_battery() -> Path | None:
     """Return path to first battery with capacity (e.g. BAT0)."""
+    # Fast path: most systems have BAT0
+    bat0_cap = SYSFS_POWER / "BAT0" / "capacity"
+    if bat0_cap.exists():
+        return SYSFS_POWER / "BAT0"
     if not SYSFS_POWER.exists():
         return None
-    for name in sorted(SYSFS_POWER.iterdir()):
-        if not name.is_dir():
-            continue
-        cap = name / "capacity"
-        if cap.exists():
+    for name in SYSFS_POWER.iterdir():
+        if name.is_dir() and (name / "capacity").exists():
             return name
     return None
 
@@ -48,8 +47,8 @@ def read_battery(bat_path: Path) -> tuple[int, str]:
 
 
 def main() -> None:
-    blue: str | None = os.environ.get("BLUE_COLOR", "")
-    yellow: str | None = os.environ.get("YELLOW_COLOR", "")
+    blue: str = os.environ.get("BLUE_COLOR", "#0000ff")
+    yellow: str = os.environ.get("YELLOW_COLOR", "#ffff00")
 
     bat_path = find_battery()
     if bat_path is None:
@@ -84,12 +83,9 @@ def main() -> None:
             except OSError:
                 pass
 
-    # Status bar output
-    icon_part = f"{BATTERY_ICON}{CHARGING_ICON if charging else ''}"
-    if charging:
-        print(f"^c{yellow}^ {icon_part} {capacity} ", end="")
-    else:
-        print(f"^c{yellow}^ {icon_part} {capacity} ", end="")
+    # Status bar output (single print)
+    icon_part = f"{BATTERY_ICON}{' ' + CHARGING_ICON + ' ' if charging else ''}"
+    print(f" ^c{yellow}^{icon_part} {capacity}%", end="")
 
 
 if __name__ == "__main__":

@@ -1,25 +1,97 @@
-#!/bin/bash
+#!/usr/bin/env python3
+"""
+Network speed (rx/tx delta) for status bars (dwm/slstatus etc.).
+Reads from sysfs, caches previous totals, prints human-readable deltas.
+"""
 
-source $HOME/.colors
+import os
+from pathlib import Path
 
-update() {
-	sum=0
-	for arg; do
-		read -r i <"$arg"
-		sum=$((sum + i))
-	done
-	cache=${XDG_CACHE_HOME:-$HOME/.cache}/${1##*/}
-	[ -f "$cache" ] && read -r old <"$cache" || old=0
-	printf %d\\n "$sum" >"$cache"
-	printf %d\\n $((sum - old))
-}
+# --- Icons (change these in one place) ---
+DOWNLOAD_ICON = " "  # Download (Nerd Font:  )
+UPLOAD_ICON = " "  # Upload (Nerd Font:  )
 
-rx=$(update /sys/class/net/[ew]*/statistics/rx_bytes)
-tx=$(update /sys/class/net/[ew]*/statistics/tx_bytes)
+# --- Config ---
+SYSFS_NET = Path("/sys/class/net")
+CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")))
+RX_CACHE = CACHE_DIR / "get_network_speed_rx"
+TX_CACHE = CACHE_DIR / "get_network_speed_tx"
 
-dAColor="^c$GREEN_COLOR^"
-dTColor="^c$LIGHT_BLUE_COLOR^"
-uAColor="^c$BLUE_COLOR^"
-uTColor="^c$LIGHT_BLUE_COLOR^"
 
-printf "$dAColor  $dTColor %s $uAColor  $uTColor %s " $(numfmt --to=iec $rx) $(numfmt --to=iec $tx)
+def interfaces_ew() -> list[Path]:
+    """Return paths to interfaces whose name starts with e or w (eth, wlan, etc.)."""
+    if not SYSFS_NET.exists():
+        return []
+    return [p for p in SYSFS_NET.iterdir() if p.is_dir() and p.name[:1] in ("e", "w")]
+
+
+def sum_stat(ifaces: list[Path], stat: str) -> int:
+    """Sum stat (rx_bytes or tx_bytes) over given interfaces."""
+    total = 0
+    for iface in ifaces:
+        f = iface / "statistics" / stat
+        if f.exists():
+            try:
+                total += int(f.read_text().strip())
+            except (ValueError, OSError):
+                pass
+    return total
+
+
+def update_delta(cache_path: Path, current: int) -> int:
+    """Write current to cache, return (current - previous). Caller must ensure CACHE_DIR exists."""
+    try:
+        prev = int(cache_path.read_text().strip()) if cache_path.exists() else 0
+    except (ValueError, OSError):
+        prev = 0
+    try:
+        cache_path.write_text(str(current))
+    except OSError:
+        pass
+    return current - prev
+
+
+def bytes_to_iec(n: int) -> str:
+    """Format bytes as human-readable IEC (K, M, G, T), like numfmt --to=iec."""
+    if n < 0:
+        n = 0
+    units = ["", "K", "M", "G", "T"]
+    i = 0
+    v = float(n)
+    while v >= 1024 and i < len(units) - 1:
+        v /= 1024
+        i += 1
+    if i == 0:
+        return f"{int(v)}"
+    return f"{v:.1f}{units[i]}"
+
+
+def main() -> None:
+    d_color = os.environ.get("GREEN_COLOR", "")
+    d_text_color = os.environ.get("LIGHT_BLUE_COLOR", "")
+    u_color = os.environ.get("BLUE_COLOR", "")
+    u_text_color = os.environ.get("LIGHT_BLUE_COLOR", "")
+
+    ifaces = interfaces_ew()
+    rx_sum = sum_stat(ifaces, "rx_bytes")
+    tx_sum = sum_stat(ifaces, "tx_bytes")
+
+    try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    rx_delta = update_delta(RX_CACHE, rx_sum)
+    tx_delta = update_delta(TX_CACHE, tx_sum)
+
+    rx_str = bytes_to_iec(rx_delta)
+    tx_str = bytes_to_iec(tx_delta)
+
+    print(
+        f"^c{d_color}^ {DOWNLOAD_ICON}^c{d_text_color}^ {rx_str} "
+        f"^c{u_color}^ {UPLOAD_ICON}^c{u_text_color}^ {tx_str} ",
+        end="",
+    )
+
+
+if __name__ == "__main__":
+    main()
