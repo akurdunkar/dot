@@ -1,29 +1,96 @@
-#!/bin/sh
+#!/usr/bin/env python3
+"""
+Battery status for status bars (dwm/slstatus etc.).
+Reads from sysfs only (no acpi). Supports low-battery notification.
+"""
 
-# Exit if no battery exists
-if [ ! -f /sys/class/power_supply/BAT0/capacity ]; then
-	printf "^c%s^   " "$BLUE_COLOR"
-	exit 0
-fi
+import os
+import subprocess
+from pathlib import Path
 
-battery_percentage=$(cat /sys/class/power_supply/BAT0/capacity)
-charging=$(acpi 2>/dev/null | awk '{print $3}')
-NFILE="/tmp/nfile"
-min_battery_allowed=20
+# --- Icons (change these in one place) ---
+NO_BATTERY_ICON = ""  # No battery / desktop (Nerd Font:   )
+BATTERY_ICON = "󰂂"  # Next to percentage (e.g. " " or "")
+CHARGING_ICON = "󰂄"  # When charging (e.g. " " or "")
 
-# Low battery notification
-if [ "$battery_percentage" -lt "$min_battery_allowed" ] && [ ! -e "$NFILE" ]; then
-	touch "$NFILE"
-	notify-send -u critical "Low Battery!" "Please Plugin The Charge"
-fi
+# --- Config ---
+SYSFS_POWER = Path("/sys/class/power_supply")
+MIN_BATTERY_PERCENT = int(os.environ.get("MIN_BATTERY_NOTIFY", "20"))
+LOCK_FILE = Path(f"/tmp/low_battery_notified_{os.getuid()}")
 
-# Remove notification file when battery is sufficient
-if [ "$battery_percentage" -ge "$min_battery_allowed" ] && [ -e "$NFILE" ]; then
-	rm "$NFILE"
-fi
 
-if [ "$charging" = "Charging," ]; then
-	printf " ^c%s^  %s  " "$YELLOW_COLOR" "$battery_percentage"
-else
-	printf " ^c%s^  %s " "$YELLOW_COLOR" "$battery_percentage"
-fi
+def find_battery() -> Path | None:
+    """Return path to first battery with capacity (e.g. BAT0)."""
+    if not SYSFS_POWER.exists():
+        return None
+    for name in sorted(SYSFS_POWER.iterdir()):
+        if not name.is_dir():
+            continue
+        cap = name / "capacity"
+        if cap.exists():
+            return name
+    return None
+
+
+def read_battery(bat_path: Path) -> tuple[int, str]:
+    """Return (capacity_percent, status). Status: Charging, Discharging, Full, Not charging."""
+    cap_file = bat_path / "capacity"
+    status_file = bat_path / "status"
+    try:
+        capacity = int(cap_file.read_text().strip())
+    except (ValueError, OSError):
+        capacity = 0
+    try:
+        status = status_file.read_text().strip() or "Unknown"
+    except OSError:
+        status = "Unknown"
+    return capacity, status
+
+
+def main() -> None:
+    blue: str | None = os.environ.get("BLUE_COLOR", "")
+    yellow: str | None = os.environ.get("YELLOW_COLOR", "")
+
+    bat_path = find_battery()
+    if bat_path is None:
+        print(f"^c{blue}^{NO_BATTERY_ICON}", end="")
+        return
+
+    capacity, status = read_battery(bat_path)
+    charging = status == "Charging"
+
+    # Low battery notification (one-shot until above threshold again)
+    if capacity < MIN_BATTERY_PERCENT:
+        if not LOCK_FILE.exists():
+            try:
+                LOCK_FILE.touch()
+                subprocess.run(
+                    [
+                        "notify-send",
+                        "-u",
+                        "critical",
+                        "Low Battery!",
+                        "Please plug in the charger",
+                    ],
+                    check=False,
+                    timeout=5,
+                )
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                pass
+    else:
+        if LOCK_FILE.exists():
+            try:
+                LOCK_FILE.unlink()
+            except OSError:
+                pass
+
+    # Status bar output
+    icon_part = f"{BATTERY_ICON}{CHARGING_ICON if charging else ''}"
+    if charging:
+        print(f"^c{yellow}^ {icon_part} {capacity} ", end="")
+    else:
+        print(f"^c{yellow}^ {icon_part} {capacity} ", end="")
+
+
+if __name__ == "__main__":
+    main()
