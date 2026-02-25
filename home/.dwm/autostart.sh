@@ -1,5 +1,4 @@
 #!/bin/bash
-
 (
 	source $HOME/.rc
 	source $HOME/.colors
@@ -8,7 +7,7 @@
 	slstatus &
 	nm-applet &
 	blueman-applet &
-	dunst &
+	dunst --startup-notification true &
 	flameshot &
 	albert &
 	copyq &
