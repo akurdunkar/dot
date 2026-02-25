@@ -59,6 +59,14 @@
                 "cd ~/.pyenv && src/configure && make -C src"
             ]
         },
+        "autorandr": {
+            "repo": "phillipberndt/autorandr",
+            "artifact": "source",
+            "cmds": [
+                "tar xzf {artifact} --strip-components=1",
+                "make install TARGETS=autorandr PREFIX=$HOME/.local/"
+            ]
+        },
         "rustup": {
             "repo": "rust-lang/rustup",
             "artifact": "source",
