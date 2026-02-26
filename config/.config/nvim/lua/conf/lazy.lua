@@ -101,6 +101,12 @@ require("lazy").setup({
     'onsails/lspkind-nvim',
 
     'aditya-K2/spellfloat',
+    {
+        "aditya-K2/termtoggle.nvim",
+        config = function()
+            require("termtoggle").setup()
+        end,
+    },
 
     { 'fatih/vim-go',                           ft = "go" },
 
