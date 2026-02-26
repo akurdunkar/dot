@@ -8,7 +8,6 @@
 	nm-applet &
 	blueman-applet &
 	dunst --startup-notification true &
-	flameshot &
 	albert &
 	copyq &
 ) 2>&1 >/tmp/dwm.log
