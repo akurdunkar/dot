@@ -75,6 +75,29 @@
                 "bash rustup-init.sh -y --no-modify-path",
                 "rustup default stable"
             ]
+        },
+        "slop": {
+            "repo": "naelstrof/slop",
+            "artifact": "source",
+            "cmds": [
+                "tar xzf {artifact} --strip-components=1",
+                "cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$HOME/.local ./",
+                "make",
+                "make install"
+            ]
+        },
+        "maim": {
+            "repo": "naelstrof/maim",
+            "artifact": "source",
+            "requires": [
+                "slop"
+            ],
+            "cmds": [
+                "tar xzf {artifact} --strip-components=1",
+                "cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$HOME/.local ./",
+                "make",
+                "make install"
+            ]
         }
     }
 }
