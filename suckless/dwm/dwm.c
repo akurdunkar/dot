@@ -96,7 +96,7 @@ enum {
   NetWMWindowTypeDialog,
   NetClientList,
   NetLast
-};                                           /* EWMH atoms */
+}; /* EWMH atoms */
 enum { Manager, Xembed, XembedInfo, XLast }; /* Xembed atoms */
 enum {
   WMProtocols,
@@ -2402,6 +2402,8 @@ int updategeom(void) {
           m->clients = c->next;
           detachstack(c);
           c->mon = mons;
+          if (c->tags == m->tagset[m->seltags])
+            c->tags = mons->tagset[mons->seltags];
           attach(c);
           attachstack(c);
         }
