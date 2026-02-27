@@ -91,6 +91,12 @@ def validate_config(config: PkgConfig) -> None:
                 file=sys.stderr,
             )
             sys.exit(1)
+        if "cmds" not in pkg:
+            print(
+                f"  {RED}[F]{RESET} pkg.json: '{name}' missing required 'cmds' key",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         for req in pkg.get("requires", []):
             if req not in packages:
                 print(
@@ -209,12 +215,9 @@ def get_latest_release(repo: Any) -> Any:
     raise RuntimeError(f"no suitable release or tag found for {repo.full_name}")
 
 
-def find_asset(assets: Iterable[Any], artifact: Optional[str]) -> Optional[Any]:
+def find_asset(assets: Iterable[Any], artifact: str) -> Optional[Any]:
     for asset in assets:
-        if artifact:
-            if asset.name == artifact:
-                return asset
-        elif asset.name.lower().endswith(".appimage"):
+        if asset.name == artifact:
             return asset
     return None
 
@@ -230,17 +233,17 @@ def resolve_artifact(
 ) -> Tuple[str, str]:
     """Resolve the download URL and artifact filename from a release.
 
-    Returns (download_url, artifact_name).  Raises PackageError if no
-    matching asset is found.
+    Returns (download_url, artifact_name).  When artifact is omitted,
+    defaults to the release source tarball.  Raises PackageError if a
+    specified artifact is not found.
     """
-    if artifact == "source":
+    if artifact is None:
         return latest.tarball_url, f"{name}-{version}.tar.gz"
 
-    resolved: Optional[str] = artifact.format(version=version) if artifact else None
+    resolved: str = artifact.format(version=version)
     asset = find_asset(latest.get_assets(), resolved)
     if not asset:
-        kind: str = f"artifact '{resolved}'" if resolved else "appimage"
-        raise PackageError(f"no {kind} found in release assets")
+        raise PackageError(f"no artifact '{resolved}' found in release assets")
     return asset.browser_download_url, asset.name
 
 
@@ -335,7 +338,6 @@ def update_package(
 ) -> None:
     repo_name: str = pkg_config["repo"]
     artifact: Optional[str] = pkg_config.get("artifact")
-    bin_name: str = pkg_config.get("bin", name)
     auth_token: Optional[str] = get_auth_token(g)
 
     print(f"\n{BOLD}{CYAN}── {name} {RESET}{DIM}({repo_name}){RESET}")
@@ -374,14 +376,13 @@ def update_package(
             return
 
     pre_cmds: Optional[List[str]] = pkg_config.get("pre")
-    build_cmds: Optional[List[str]] = pkg_config.get("cmds")
+    build_cmds: List[str] = pkg_config["cmds"]
 
     install_dir.mkdir(parents=True, exist_ok=True)
 
     if pre_cmds:
         pre_vars: Dict[str, str] = {
             "install_dir": str(install_dir),
-            "bin": bin_name,
             "version": latest_version,
         }
         print(f"  {DIM}running pre commands...{RESET}")
@@ -389,40 +390,19 @@ def update_package(
         with tempfile.TemporaryDirectory(prefix=f"pack_{name}_pre_") as pre_tmpdir:
             run_build_cmds(pre_cmds, pre_vars, cwd=pre_tmpdir, log=log)
 
-    if build_cmds:
-        with tempfile.TemporaryDirectory(prefix=f"pack_{name}_") as tmpdir:
-            artifact_path: Path = Path(tmpdir) / artifact_name
-            download_with_spinner(
-                download_url, artifact_path, artifact_name, auth_token
-            )
+    with tempfile.TemporaryDirectory(prefix=f"pack_{name}_") as tmpdir:
+        artifact_path: Path = Path(tmpdir) / artifact_name
+        download_with_spinner(download_url, artifact_path, artifact_name, auth_token)
 
-            variables: Dict[str, str] = {
-                "artifact": str(artifact_path),
-                "install_dir": str(install_dir),
-                "bin": bin_name,
-                "version": latest_version,
-                "tmpdir": tmpdir,
-            }
+        variables: Dict[str, str] = {
+            "artifact": str(artifact_path),
+            "install_dir": str(install_dir),
+            "version": latest_version,
+            "tmpdir": tmpdir,
+        }
 
-            log.write(f"=== {name} ({repo_name}) ===\n")
-            run_build_cmds(build_cmds, variables, cwd=tmpdir, log=log)
-    else:
-        target: Path = install_dir / bin_name
-        backup: Path = target.with_suffix(".backup")
-
-        if target.exists():
-            target.rename(backup)
-
-        try:
-            download_with_spinner(download_url, target, artifact_name, auth_token)
-            target.chmod(0o755)
-        except Exception:
-            if backup.exists():
-                backup.rename(target)
-            raise
-
-        if backup.exists():
-            backup.unlink()
+        log.write(f"=== {name} ({repo_name}) ===\n")
+        run_build_cmds(build_cmds, variables, cwd=tmpdir, log=log)
 
     lock["packages"][name] = {
         "version": latest_version,
@@ -531,17 +511,15 @@ package config (~/pkg.json):
   each entry under "packages" supports:
     repo          GitHub owner/repo (required)
     artifact      release asset to download:
-                    - omit to auto-detect first .appimage
+                    - omit to download the release source tarball
                     - exact name, e.g. "nvim-linux-x86_64.appimage"
                     - supports {version} templating, e.g. "tmux-{version}.tar.gz"
-                    - "source" to download the release source tarball
-    bin           name for the installed binary (defaults to package name)
     requires      array of package names (from pkg.json) that must be installed
                   before this package; missing deps cause the package to be skipped
     pre           array of shell commands to run before download/build
-                  available variables: {install_dir} {bin} {version}
-    cmds          array of shell commands to run after downloading to /tmp
-                  available variables: {artifact} {install_dir} {bin} {version} {tmpdir}
+                  available variables: {install_dir} {version}
+    cmds          array of shell commands to run after downloading (required)
+                  available variables: {artifact} {install_dir} {version} {tmpdir}
 
 examples:
   pack                      update all packages

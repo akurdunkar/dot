@@ -4,12 +4,15 @@
         "nvim": {
             "repo": "neovim/neovim",
             "artifact": "nvim-linux-x86_64.appimage",
-            "bin": "nvim",
+            "requires": [
+                "rustup"
+            ],
             "pre": [
                 "cargo install --locked tree-sitter-cli"
             ],
-            "requires": [
-                "rustup"
+            "cmds": [
+                "cp {artifact} {install_dir}/nvim",
+                "chmod +x {install_dir}/nvim"
             ]
         },
         "tmux": {
@@ -24,7 +27,6 @@
         },
         "nvm": {
             "repo": "nvm-sh/nvm",
-            "artifact": "source",
             "cmds": [
                 "tar xzf {artifact} --strip-components=1",
                 "bash ./install.sh",
@@ -33,7 +35,6 @@
         },
         "z.sh": {
             "repo": "rupa/z",
-            "artifact": "source",
             "cmds": [
                 "tar xzf {artifact} --strip-components=1",
                 "cp -vf z.sh $HOME"
@@ -49,7 +50,6 @@
         },
         "pyenv": {
             "repo": "pyenv/pyenv",
-            "artifact": "source",
             "pre": [
                 "\\rm -rfv $PYENV_ROOT"
             ],
@@ -61,7 +61,6 @@
         },
         "autorandr": {
             "repo": "phillipberndt/autorandr",
-            "artifact": "source",
             "cmds": [
                 "tar xzf {artifact} --strip-components=1",
                 "make install TARGETS=autorandr PREFIX=$HOME/.local/"
@@ -69,7 +68,6 @@
         },
         "rustup": {
             "repo": "rust-lang/rustup",
-            "artifact": "source",
             "cmds": [
                 "tar xzf {artifact} --strip-components=1",
                 "bash rustup-init.sh -y --no-modify-path",
@@ -78,7 +76,6 @@
         },
         "slop": {
             "repo": "naelstrof/slop",
-            "artifact": "source",
             "cmds": [
                 "tar xzf {artifact} --strip-components=1",
                 "cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$HOME/.local ./",
@@ -88,7 +85,6 @@
         },
         "maim": {
             "repo": "naelstrof/maim",
-            "artifact": "source",
             "requires": [
                 "slop"
             ],
