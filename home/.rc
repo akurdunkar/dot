@@ -1,29 +1,7 @@
 #!/bin/bash
 
-#-(Source Files)--------------------------------------------------------------
-__source__() {
-	local hostname
-	hostname=$(hostname)
-	local file="$HOME/$hostname/$1"
-
-	# Source common file only if second arg isn't set
-	if [ "$#" -lt 2 ]; then
-		# shellcheck source=/dev/null
-		source "$HOME/$1" # Source common file first
-	fi
-
-	# Check if hostname-specific file exists
-	if [[ -f "$file" ]]; then
-		# shellcheck source=/dev/null
-		source "$file"
-	else
-		echo "Unable to find priv files for $hostname.."
-	fi
-}
-
-__source__ ".env"
-__source__ ".alias"
-__source__ ".rc" priv-only
+source $HOME/.env
+source $HOME/.alias
 
 #-(Create directories that might not exist but are required )-------------------
 
@@ -39,3 +17,7 @@ __source__ ".rc" priv-only
 
 source $HOME/.functions
 source $HOME/.completions
+
+srchost .env
+srchost .alias
+srchost .rc

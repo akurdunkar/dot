@@ -112,3 +112,15 @@ sb() {
 		source "$HOME/.bashrc"
 	fi
 }
+
+srchost() {
+	local file="$HOME/$(hostname)/$1"
+
+	# Check if hostname-specific file exists
+	if [[ -f "$file" ]]; then
+		# shellcheck source=/dev/null
+		source "$file"
+	else
+		echo "Unable to find priv files for $(hostname).."
+	fi
+}
