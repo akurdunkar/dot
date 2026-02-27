@@ -8,7 +8,6 @@ source $HOME/.alias
 ! [[ -d "$VENV_DIR" ]] && mkdir "$VENV_DIR"
 ! [[ -d "$CODE_DIR" ]] && mkdir "$CODE_DIR"
 ! [[ -d "$NOTES_DIR" ]] && mkdir "$NOTES_DIR"
-! [[ -d "$STASH_DIR" ]] && mkdir "$STASH_DIR"
 
 #-----------------------------------------------------------------------------
 
