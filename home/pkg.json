@@ -1,99 +1,104 @@
 {
-    "install_dir": "~/.local/bin",
-    "packages": {
-        "nvim": {
-            "repo": "neovim/neovim",
-            "artifact": "nvim-linux-x86_64.appimage",
-            "requires": [
-                "rustup"
-            ],
-            "pre": [
-                "cargo install --locked tree-sitter-cli"
-            ],
-            "cmds": [
-                "cp {artifact} {install_dir}/nvim",
-                "chmod +x {install_dir}/nvim"
-            ]
+    "$schema": "./pkg.schema.json",
+    "github": {
+        "vars": {
+            "install_dir": "~/.local/bin"
         },
-        "tmux": {
-            "repo": "tmux/tmux",
-            "artifact": "tmux-{version}.tar.gz",
-            "cmds": [
-                "tar xzf {artifact} --strip-components=1",
-                "./configure --prefix=$HOME/.local --bindir={install_dir}",
-                "make",
-                "make install"
-            ]
-        },
-        "nvm": {
-            "repo": "nvm-sh/nvm",
-            "cmds": [
-                "tar xzf {artifact} --strip-components=1",
-                "bash ./install.sh",
-                ". $NVM_DIR/nvm.sh && nvm install node"
-            ]
-        },
-        "z.sh": {
-            "repo": "rupa/z",
-            "cmds": [
-                "tar xzf {artifact} --strip-components=1",
-                "cp -vf z.sh $HOME"
-            ]
-        },
-        "meson": {
-            "repo": "mesonbuild/meson",
-            "artifact": "meson-{version}.tar.gz",
-            "cmds": [
-                "tar xzf {artifact} --strip-components=1",
-                "pip install --user --break-system-packages ."
-            ]
-        },
-        "pyenv": {
-            "repo": "pyenv/pyenv",
-            "pre": [
-                "\\rm -rfv $PYENV_ROOT"
-            ],
-            "cmds": [
-                "mkdir -pv ~/.pyenv",
-                "tar xzf {artifact} --strip-components=1 -C ~/.pyenv",
-                "cd ~/.pyenv && src/configure && make -C src"
-            ]
-        },
-        "autorandr": {
-            "repo": "phillipberndt/autorandr",
-            "cmds": [
-                "tar xzf {artifact} --strip-components=1",
-                "make install TARGETS=autorandr PREFIX=$HOME/.local/"
-            ]
-        },
-        "rustup": {
-            "repo": "rust-lang/rustup",
-            "cmds": [
-                "tar xzf {artifact} --strip-components=1",
-                "bash rustup-init.sh -y --no-modify-path",
-                "rustup default stable"
-            ]
-        },
-        "slop": {
-            "repo": "naelstrof/slop",
-            "cmds": [
-                "tar xzf {artifact} --strip-components=1",
-                "cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$HOME/.local ./",
-                "make",
-                "make install"
-            ]
-        },
-        "maim": {
-            "repo": "naelstrof/maim",
-            "requires": [
-                "slop"
-            ],
-            "cmds": [
-                "tar xzf {artifact} --strip-components=1",
-                "cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$HOME/.local ./",
-                "make",
-                "make install"
-            ]
+        "packages": {
+            "nvim": {
+                "repo": "neovim/neovim",
+                "artifact": "nvim-linux-x86_64.appimage",
+                "requires": [
+                    "github/rustup"
+                ],
+                "pre": [
+                    "cargo install --locked tree-sitter-cli"
+                ],
+                "cmds": [
+                    "cp {artifact} {install_dir}/nvim",
+                    "chmod +x {install_dir}/nvim"
+                ]
+            },
+            "tmux": {
+                "repo": "tmux/tmux",
+                "artifact": "tmux-{version}.tar.gz",
+                "cmds": [
+                    "tar xzf {artifact} --strip-components=1",
+                    "./configure --prefix=$HOME/.local --bindir={install_dir}",
+                    "make",
+                    "make install"
+                ]
+            },
+            "nvm": {
+                "repo": "nvm-sh/nvm",
+                "cmds": [
+                    "tar xzf {artifact} --strip-components=1",
+                    "bash ./install.sh",
+                    ". $NVM_DIR/nvm.sh && nvm install node"
+                ]
+            },
+            "z.sh": {
+                "repo": "rupa/z",
+                "cmds": [
+                    "tar xzf {artifact} --strip-components=1",
+                    "cp -vf z.sh $HOME"
+                ]
+            },
+            "meson": {
+                "repo": "mesonbuild/meson",
+                "artifact": "meson-{version}.tar.gz",
+                "cmds": [
+                    "tar xzf {artifact} --strip-components=1",
+                    "pip install --user --break-system-packages ."
+                ]
+            },
+            "pyenv": {
+                "repo": "pyenv/pyenv",
+                "pre": [
+                    "\\rm -rfv $PYENV_ROOT"
+                ],
+                "cmds": [
+                    "mkdir -pv ~/.pyenv",
+                    "tar xzf {artifact} --strip-components=1 -C ~/.pyenv",
+                    "cd ~/.pyenv && src/configure && make -C src"
+                ]
+            },
+            "autorandr": {
+                "repo": "phillipberndt/autorandr",
+                "cmds": [
+                    "tar xzf {artifact} --strip-components=1",
+                    "make install TARGETS=autorandr PREFIX=$HOME/.local/"
+                ]
+            },
+            "rustup": {
+                "repo": "rust-lang/rustup",
+                "cmds": [
+                    "tar xzf {artifact} --strip-components=1",
+                    "bash rustup-init.sh -y --no-modify-path",
+                    "rustup default stable"
+                ]
+            },
+            "slop": {
+                "repo": "naelstrof/slop",
+                "cmds": [
+                    "tar xzf {artifact} --strip-components=1",
+                    "cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$HOME/.local ./",
+                    "make",
+                    "make install"
+                ]
+            },
+            "maim": {
+                "repo": "naelstrof/maim",
+                "requires": [
+                    "slop"
+                ],
+                "cmds": [
+                    "tar xzf {artifact} --strip-components=1",
+                    "cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$HOME/.local ./",
+                    "make",
+                    "make install"
+                ]
+            }
         }
     }
 }

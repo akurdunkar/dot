@@ -10,8 +10,9 @@ import tempfile
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import IO, Any, Deque, Dict, Iterable, List, Optional, Tuple
+from typing import IO, Any, Callable, Deque, Dict, Iterable, List, Optional, Tuple
 
+import jsonschema
 import requests
 from colored import attr, fg
 from github import Auth, Github, UnknownObjectException
@@ -19,6 +20,7 @@ from yaspin import yaspin
 
 PkgConfig = Dict[str, Any]
 LockData = Dict[str, Any]
+SourceConfig = Dict[str, Any]
 
 DIM: str = attr("dim")
 GREEN: str = fg("green")
@@ -30,81 +32,36 @@ RESET: str = attr("reset")
 
 PKG_JSON: Path = Path.home() / "pkg.json"
 PKG_LOCK: Path = Path.home() / "pkg.lock"
-DEFAULT_INSTALL_DIR: Path = Path.home() / ".local" / "bin"
+PKG_SCHEMA: Path = Path.home() / "pkg.schema.json"
 BUILD_LOG: Path = Path("/tmp/pack.build.log")
 
 BUILD_LOG_LINES: int = 15
 HTTP_TIMEOUT: int = 30
+
+RESERVED_KEYS: frozenset[str] = frozenset({"$schema"})
 
 
 class PackageError(Exception):
     """Raised when a package operation fails in a recoverable way."""
 
 
-def get_auth_token(g: Github) -> Optional[str]:
-    """Extract the raw token string from a Github client, if authenticated."""
-    auth = getattr(g, "auth", None)
-    if auth and hasattr(auth, "token"):
-        return auth.token  # type: ignore[union-attr]
-    return None
-
-
-def get_github_client() -> Github:
-    """Create an authenticated GitHub client.
-
-    Tries GITHUB_TOKEN env var, then gh CLI, then falls back to unauthenticated.
-    """
-    token: Optional[str] = os.environ.get("GITHUB_TOKEN")
-    if token:
-        return Github(auth=Auth.Token(token))
-
-    try:
-        result: subprocess.CompletedProcess[str] = subprocess.run(
-            ["gh", "auth", "token"],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return Github(auth=Auth.Token(result.stdout.strip()))
-    except FileNotFoundError:
-        pass
-
-    return Github()
-
-
 def validate_config(config: PkgConfig) -> None:
-    """Validate the structure of pkg.json and exit on errors."""
-    packages = config.get("packages")
-    if packages is None:
-        print(f"  {RED}[F]{RESET} pkg.json: missing 'packages' key", file=sys.stderr)
+    if not PKG_SCHEMA.exists():
+        print(f"  {RED}[F]{RESET} {PKG_SCHEMA} not found", file=sys.stderr)
         sys.exit(1)
-    if not isinstance(packages, dict):
+    with open(PKG_SCHEMA) as f:
+        schema: Dict[str, Any] = json.load(f)
+    try:
+        jsonschema.validate(config, schema)
+    except jsonschema.ValidationError as e:
+        path: str = (
+            "/".join(str(p) for p in e.absolute_path) if e.absolute_path else "(root)"
+        )
         print(
-            f"  {RED}[F]{RESET} pkg.json: 'packages' must be an object",
+            f"  {RED}[F]{RESET} pkg.json validation error at '{path}': {e.message}",
             file=sys.stderr,
         )
         sys.exit(1)
-    for name, pkg in packages.items():
-        if "repo" not in pkg:
-            print(
-                f"  {RED}[F]{RESET} pkg.json: '{name}' missing required 'repo' key",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        if "cmds" not in pkg:
-            print(
-                f"  {RED}[F]{RESET} pkg.json: '{name}' missing required 'cmds' key",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        for req in pkg.get("requires", []):
-            if req not in packages:
-                print(
-                    f"  {RED}[F]{RESET} pkg.json: '{name}' requires"
-                    f" unknown package '{req}'",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
 
 
 def load_pkg_json() -> PkgConfig:
@@ -121,7 +78,7 @@ def load_pkg_lock() -> LockData:
     if PKG_LOCK.exists():
         with open(PKG_LOCK) as f:
             return json.load(f)
-    return {"packages": {}}
+    return {}
 
 
 def save_pkg_lock(lock: LockData) -> None:
@@ -130,21 +87,27 @@ def save_pkg_lock(lock: LockData) -> None:
         f.write("\n")
 
 
-def topo_sort(targets: List[str], packages: Dict[str, "PkgConfig"]) -> List[str]:
-    """Return *targets* ordered so that dependencies come before dependents.
+def get_sources(config: PkgConfig) -> Dict[str, SourceConfig]:
+    """Return source configs, filtering out reserved keys like $schema."""
+    return {k: v for k, v in config.items() if k not in RESERVED_KEYS}
 
-    Only packages that appear in *targets* are included.  If a required
-    package is not in the target list but exists in *packages*, it is
-    pulled in automatically so it can be installed first.
+
+def topo_sort(
+    targets: List[str],
+    get_requires: Callable[[str], List[str]],
+    all_names: set[str],
+) -> List[str]:
+    """Topological sort of targets using a get_requires callback.
+
+    Automatically pulls in dependencies that exist in all_names.
     """
     target_set: set[str] = set(targets)
 
-    # Expand: if a target requires X and X is in packages, add X
     queue: Deque[str] = deque(targets)
     while queue:
         name = queue.popleft()
-        for req in packages.get(name, {}).get("requires", []):
-            if req not in target_set and req in packages:
+        for req in get_requires(name):
+            if req not in target_set and req in all_names:
                 target_set.add(req)
                 queue.append(req)
 
@@ -152,13 +115,12 @@ def topo_sort(targets: List[str], packages: Dict[str, "PkgConfig"]) -> List[str]
     dependents: Dict[str, List[str]] = {n: [] for n in target_set}
 
     for name in target_set:
-        for req in packages.get(name, {}).get("requires", []):
+        for req in get_requires(name):
             if req in target_set:
                 in_degree[name] += 1
                 dependents[req].append(name)
 
     ready: Deque[str] = deque(n for n in targets if in_degree.get(n, 0) == 0)
-    # Also add any pulled-in deps that aren't already queued
     for n in target_set - set(targets):
         if in_degree[n] == 0:
             ready.append(n)
@@ -181,45 +143,15 @@ def topo_sort(targets: List[str], packages: Dict[str, "PkgConfig"]) -> List[str]
     return ordered
 
 
-class TagShim:
-    """Minimal release-like wrapper around a Git tag."""
+def sort_sources(sources: Dict[str, SourceConfig]) -> List[str]:
+    """Topo-sort source names based on source-level requires."""
+    names: List[str] = list(sources.keys())
+    all_names: set[str] = set(names)
 
-    def __init__(self, tag: Any) -> None:
-        self.tag_name: str = tag.name
-        self.tarball_url: str = tag.tarball_url
+    def get_req(name: str) -> List[str]:
+        return sources.get(name, {}).get("requires", [])
 
-    @staticmethod
-    def get_assets() -> List[Any]:
-        return []
-
-
-def get_latest_release(repo: Any) -> Any:
-    """Return the latest release, falling back to the most recent by date.
-
-    Some repos (e.g. rustup) don't mark any release as 'latest', causing the
-    /releases/latest endpoint to 404.  In that case, fetch all releases and
-    return the most recent non-draft, non-prerelease one.  If there are no
-    releases at all, fall back to the latest tag.
-    """
-    try:
-        return repo.get_latest_release()
-    except UnknownObjectException:
-        for release in repo.get_releases():
-            if not release.draft and not release.prerelease:
-                return release
-
-    tags = repo.get_tags()
-    if tags.totalCount:
-        return TagShim(tags[0])
-
-    raise RuntimeError(f"no suitable release or tag found for {repo.full_name}")
-
-
-def find_asset(assets: Iterable[Any], artifact: str) -> Optional[Any]:
-    for asset in assets:
-        if asset.name == artifact:
-            return asset
-    return None
+    return topo_sort(names, get_req, all_names)
 
 
 def download_to(resp: requests.Response, dest: Path) -> None:
@@ -228,29 +160,9 @@ def download_to(resp: requests.Response, dest: Path) -> None:
             f.write(chunk)
 
 
-def resolve_artifact(
-    latest: Any, artifact: Optional[str], name: str, version: str
-) -> Tuple[str, str]:
-    """Resolve the download URL and artifact filename from a release.
-
-    Returns (download_url, artifact_name).  When artifact is omitted,
-    defaults to the release source tarball.  Raises PackageError if a
-    specified artifact is not found.
-    """
-    if artifact is None:
-        return latest.tarball_url, f"{name}-{version}.tar.gz"
-
-    resolved: str = artifact.format(version=version)
-    asset = find_asset(latest.get_assets(), resolved)
-    if not asset:
-        raise PackageError(f"no artifact '{resolved}' found in release assets")
-    return asset.browser_download_url, asset.name
-
-
 def download_with_spinner(
     url: str, dest: Path, label: str, auth_token: Optional[str] = None
 ) -> None:
-    """Download a file with a spinner, optional auth, and timeout."""
     headers: Dict[str, str] = {}
     if auth_token:
         headers["Authorization"] = f"token {auth_token}"
@@ -264,7 +176,6 @@ def download_with_spinner(
 
 
 def clear_lines(n: int) -> None:
-    """Move cursor up n lines and clear everything below."""
     if n > 0:
         sys.stdout.write(f"\033[{n}A\033[J")
         sys.stdout.flush()
@@ -326,29 +237,131 @@ def run_build_cmds(
             raise RuntimeError(f"build command failed (exit {returncode}): {expanded}")
 
 
-def update_package(
+def resolve_pkg_requires(
+    requires: List[str], source_name: str
+) -> List[Tuple[str, str]]:
+    """Parse requires list into (source, name) tuples.
+
+    Bare names resolve to current source. Qualified 'source/name' are split.
+    """
+
+    def parse(req: str) -> Tuple[str, str]:
+        src, _, name = req.partition("/")
+        return (src, name) if name else (source_name, req)
+
+    return [parse(r) for r in requires]
+
+
+def check_requires(requires: List[str], source_name: str, lock: LockData) -> None:
+    """Raise PackageError if any required package is not installed."""
+    missing: List[str] = [
+        f"{src}/{name}"
+        for src, name in resolve_pkg_requires(requires, source_name)
+        if name not in lock.get(src, {})
+    ]
+    if missing:
+        raise PackageError(f"missing required packages: {', '.join(missing)}")
+
+
+def get_github_client() -> Github:
+    """Create an authenticated GitHub client.
+
+    Tries GITHUB_TOKEN env var, then gh CLI, then falls back to unauthenticated.
+    """
+    token: Optional[str] = os.environ.get("GITHUB_TOKEN")
+    if token:
+        return Github(auth=Auth.Token(token))
+
+    try:
+        result: subprocess.CompletedProcess[str] = subprocess.run(
+            ["gh", "auth", "token"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return Github(auth=Auth.Token(result.stdout.strip()))
+    except FileNotFoundError:
+        pass
+
+    return Github()
+
+
+def get_auth_token(g: Github) -> Optional[str]:
+    auth = getattr(g, "auth", None)
+    if auth and hasattr(auth, "token"):
+        return auth.token  # type: ignore[union-attr]
+    return None
+
+
+class TagShim:
+    """Minimal release-like wrapper around a Git tag."""
+
+    def __init__(self, tag: Any) -> None:
+        self.tag_name: str = tag.name
+        self.tarball_url: str = tag.tarball_url
+
+    @staticmethod
+    def get_assets() -> List[Any]:
+        return []
+
+
+def get_latest_release(repo: Any) -> Any:
+    """Return the latest release, falling back to the most recent by date."""
+    try:
+        return repo.get_latest_release()
+    except UnknownObjectException:
+        for release in repo.get_releases():
+            if not release.draft and not release.prerelease:
+                return release
+
+    tags = repo.get_tags()
+    if tags.totalCount:
+        return TagShim(tags[0])
+
+    raise RuntimeError(f"no suitable release or tag found for {repo.full_name}")
+
+
+def find_asset(assets: Iterable[Any], artifact: str) -> Optional[Any]:
+    return next((a for a in assets if a.name == artifact), None)
+
+
+def resolve_artifact(
+    latest: Any, artifact: Optional[str], name: str, version: str
+) -> Tuple[str, str]:
+    """Resolve the download URL and artifact filename from a release."""
+    if artifact is None:
+        return latest.tarball_url, f"{name}-{version}.tar.gz"
+
+    resolved: str = artifact.format(version=version)
+    asset = find_asset(latest.get_assets(), resolved)
+    if not asset:
+        raise PackageError(f"no artifact '{resolved}' found in release assets")
+    return asset.browser_download_url, asset.name
+
+
+def github_update_package(
     name: str,
     pkg_config: PkgConfig,
-    lock: LockData,
+    source_name: str,
+    source_lock: Dict[str, Any],
+    full_lock: LockData,
     g: Github,
-    install_dir: Path,
+    auth_token: Optional[str],
+    source_vars: Dict[str, str],
     log: IO[str],
     force: bool = False,
     yes: bool = False,
 ) -> None:
     repo_name: str = pkg_config["repo"]
     artifact: Optional[str] = pkg_config.get("artifact")
-    auth_token: Optional[str] = get_auth_token(g)
 
     print(f"\n{BOLD}{CYAN}── {name} {RESET}{DIM}({repo_name}){RESET}")
 
     requires: List[str] = pkg_config.get("requires", [])
     if requires:
-        missing: List[str] = [r for r in requires if r not in lock["packages"]]
-        if missing:
-            raise PackageError(f"missing required packages: {', '.join(missing)}")
+        check_requires(requires, source_name, full_lock)
 
-    current: Dict[str, Any] = lock["packages"].get(name, {})
+    current: Dict[str, Any] = source_lock.get(name, {})
     current_version: str = current.get("version", "none")
     print(f"  {DIM}installed{RESET}  {current_version}")
 
@@ -378,33 +391,28 @@ def update_package(
     pre_cmds: Optional[List[str]] = pkg_config.get("pre")
     build_cmds: List[str] = pkg_config["cmds"]
 
-    install_dir.mkdir(parents=True, exist_ok=True)
+    expanded_vars: Dict[str, str] = {**source_vars, "version": latest_version}
 
     if pre_cmds:
-        pre_vars: Dict[str, str] = {
-            "install_dir": str(install_dir),
-            "version": latest_version,
-        }
         print(f"  {DIM}running pre commands...{RESET}")
         log.write(f"=== {name} pre ===\n")
         with tempfile.TemporaryDirectory(prefix=f"pack_{name}_pre_") as pre_tmpdir:
-            run_build_cmds(pre_cmds, pre_vars, cwd=pre_tmpdir, log=log)
+            run_build_cmds(pre_cmds, expanded_vars, cwd=pre_tmpdir, log=log)
 
     with tempfile.TemporaryDirectory(prefix=f"pack_{name}_") as tmpdir:
         artifact_path: Path = Path(tmpdir) / artifact_name
         download_with_spinner(download_url, artifact_path, artifact_name, auth_token)
 
         variables: Dict[str, str] = {
+            **expanded_vars,
             "artifact": str(artifact_path),
-            "install_dir": str(install_dir),
-            "version": latest_version,
             "tmpdir": tmpdir,
         }
 
         log.write(f"=== {name} ({repo_name}) ===\n")
         run_build_cmds(build_cmds, variables, cwd=tmpdir, log=log)
 
-    lock["packages"][name] = {
+    source_lock[name] = {
         "version": latest_version,
         "artifact": artifact_name,
         "repo": repo_name,
@@ -415,85 +423,180 @@ def update_package(
     print(f"  {GREEN}[OK]{RESET} installed {name} v{latest_version}")
 
 
-def cmd_update(args: argparse.Namespace, config: PkgConfig) -> None:
-    lock: LockData = load_pkg_lock()
-    install_dir: Path = Path(
-        config.get("install_dir", str(DEFAULT_INSTALL_DIR))
-    ).expanduser()
-    packages: Dict[str, PkgConfig] = config.get("packages", {})
+def handle_github_update(
+    source_name: str,
+    source_config: SourceConfig,
+    lock: LockData,
+    log: IO[str],
+    force: bool,
+    yes: bool,
+    filter_packages: Optional[List[str]],
+) -> None:
+    packages: Dict[str, PkgConfig] = source_config.get("packages", {})
+    if not isinstance(packages, dict):
+        return
+
+    raw_vars: Dict[str, str] = source_config.get("vars", {})
+    source_vars: Dict[str, str] = {
+        k: str(Path(v).expanduser()) if k.endswith("_dir") else v
+        for k, v in raw_vars.items()
+    }
+
+    for k, v in source_vars.items():
+        path: Path = Path(v)
+        if k.endswith("_dir"):
+            path.mkdir(parents=True, exist_ok=True)
 
     g: Github = get_github_client()
-    targets: List[str] = args.packages if args.packages else list(packages.keys())
-    force_targets: set[str] = (
-        (set(args.packages) if args.packages else set(packages.keys()))
-        if args.force
-        else set()
-    )
-    targets = topo_sort(targets, packages)
+    auth_token: Optional[str] = get_auth_token(g)
+    source_lock: Dict[str, Any] = lock.setdefault(source_name, {})
+
+    if filter_packages is not None:
+        targets: List[str] = [p for p in filter_packages if p in packages]
+    else:
+        targets = list(packages.keys())
+
+    if not targets:
+        return
+
+    def get_pkg_requires(name: str) -> List[str]:
+        """Extract same-source deps for topo sort.
+
+        Bare names pass through; qualified refs (e.g. "github/rustup")
+        are included only if they belong to this source, stripped to
+        the bare name so topo_sort can order them.
+        """
+        return [
+            r if "/" not in r else r.split("/", 1)[1]
+            for r in packages.get(name, {}).get("requires", [])
+            if "/" not in r or r.startswith(f"{source_name}/")
+        ]
+
+    targets = topo_sort(targets, get_pkg_requires, set(packages.keys()))
+
+    force_set: set[str] = set(targets) if force else set()
+
+    for name in targets:
+        try:
+            github_update_package(
+                name,
+                packages[name],
+                source_name,
+                source_lock,
+                lock,
+                g,
+                auth_token,
+                source_vars,
+                log=log,
+                force=name in force_set,
+                yes=yes,
+            )
+        except Exception as e:
+            print(f"  {RED}[F]{RESET} {e}", file=sys.stderr)
+
+
+def github_get_status(
+    packages: Dict[str, PkgConfig], source_lock: Dict[str, Any]
+) -> List["StatusResult"]:
+    g: Github = get_github_client()
+    results: List[Tuple[str, str, Optional[str], Optional[Exception]]] = []
+
+    for name, pkg_config in packages.items():
+        current_version: str = source_lock.get(name, {}).get("version", "none")
+        try:
+            repo = g.get_repo(pkg_config["repo"])
+            latest = get_latest_release(repo)
+            latest_version: str = latest.tag_name.removeprefix("v")
+            results.append((name, current_version, latest_version, None))
+        except Exception as e:
+            results.append((name, current_version, None, e))
+
+    return results
+
+
+UpdateHandler = Callable[
+    [str, SourceConfig, LockData, IO[str], bool, bool, Optional[List[str]]], None
+]
+
+StatusResult = Tuple[str, str, Optional[str], Optional[Exception]]
+StatusHandler = Callable[[Dict[str, PkgConfig], Dict[str, Any]], List[StatusResult]]
+
+SOURCE_HANDLERS: Dict[str, UpdateHandler] = {
+    "github": handle_github_update,
+}
+
+STATUS_HANDLERS: Dict[str, StatusHandler] = {
+    "github": github_get_status,
+}
+
+
+def cmd_update(args: argparse.Namespace, config: PkgConfig) -> None:
+    lock: LockData = load_pkg_lock()
+    sources: Dict[str, SourceConfig] = get_sources(config)
+
+    filter_packages: Optional[List[str]] = args.packages if args.packages else None
+
+    ordered_sources: List[str] = sort_sources(sources)
 
     with open(BUILD_LOG, "w") as log:
-        for name in targets:
-            if name not in packages:
-                print(f"  {RED}[F]{RESET} unknown package: {name}", file=sys.stderr)
-                continue
-            try:
-                update_package(
-                    name,
-                    packages[name],
-                    lock,
-                    g,
-                    install_dir,
-                    log=log,
-                    force=name in force_targets,
-                    yes=args.yes,
+        for source_name in ordered_sources:
+            handler: Optional[UpdateHandler] = SOURCE_HANDLERS.get(source_name)
+            if handler is None:
+                print(
+                    f"\n{DIM}skipping unknown source: {source_name}{RESET}",
+                    file=sys.stderr,
                 )
-            except Exception as e:
-                print(f"  {RED}[F]{RESET} {e}", file=sys.stderr)
+                continue
+
+            print(f"\n{BOLD}{YELLOW}:: {source_name}{RESET}")
+            handler(
+                source_name,
+                sources[source_name],
+                lock,
+                log,
+                args.force,
+                args.yes,
+                filter_packages,
+            )
 
     save_pkg_lock(lock)
 
 
+def print_pkg_info(name: str, source_lock: Dict[str, Any]) -> None:
+    """Print installed version or 'not installed' for a single package."""
+    if name in source_lock:
+        info: Dict[str, Any] = source_lock[name]
+        version: str = info.get("version", "?")
+        ts: str = info.get("installed_at", "")
+        suffix: str = f" {DIM}(installed {ts}){RESET}" if ts else ""
+        print(f"  {CYAN}{name}{RESET}: {GREEN}v{version}{RESET}{suffix}")
+    else:
+        print(f"  {CYAN}{name}{RESET}: {DIM}not installed{RESET}")
+
+
 def cmd_list(config: PkgConfig) -> None:
     lock: LockData = load_pkg_lock()
-    packages: Dict[str, PkgConfig] = config.get("packages", {})
-    lock_pkgs: Dict[str, Any] = lock["packages"]
+    sources: Dict[str, SourceConfig] = get_sources(config)
 
-    for name in packages:
-        if name in lock_pkgs:
-            info: Dict[str, Any] = lock_pkgs[name]
-            ts: str = info.get("installed_at", "unknown")
-            print(
-                f"  {CYAN}{name}{RESET}: {GREEN}v{info['version']}{RESET}"
-                f" {DIM}(installed {ts}){RESET}"
-            )
-        else:
-            print(f"  {CYAN}{name}{RESET}: {DIM}not installed{RESET}")
+    for source_name, source_config in sources.items():
+        packages = source_config.get("packages", {})
+        if not packages:
+            continue
+
+        print(f"\n{BOLD}{YELLOW}:: {source_name}{RESET}")
+        source_lock: Dict[str, Any] = lock.get(source_name, {})
+        names: List[str] = (
+            list(packages.keys()) if isinstance(packages, dict) else packages
+        )
+
+        for name in names:
+            print_pkg_info(name, source_lock)
 
 
-def cmd_status(config: PkgConfig) -> None:
-    lock: LockData = load_pkg_lock()
-    packages: Dict[str, PkgConfig] = config.get("packages", {})
-    lock_pkgs: Dict[str, Any] = lock["packages"]
-
-    g: Github = get_github_client()
-
-    StatusResult = Tuple[str, str, Optional[str], Optional[Exception]]
-    results: List[StatusResult] = []
-
-    with yaspin(text="checking for updates...", color="cyan"):
-        for name, pkg_config in packages.items():
-            current_version: str = lock_pkgs.get(name, {}).get("version", "none")
-            try:
-                repo = g.get_repo(pkg_config["repo"])
-                latest = get_latest_release(repo)
-                latest_version: str = latest.tag_name.removeprefix("v")
-                results.append((name, current_version, latest_version, None))
-            except Exception as e:
-                results.append((name, current_version, None, e))
-
+def print_status_results(results: List[StatusResult]) -> None:
     for name, current, latest, err in results:
         if err:
-            print(f"  {RED}[F]{RESET} {name}: {current} {DIM}(error: {err}){RESET}")
+            print(f"  {RED}[F]{RESET} {name}: {current}" f" {DIM}(error: {err}){RESET}")
         elif current != latest:
             print(
                 f"  {YELLOW}[NEW]{RESET} {BOLD}{name}{RESET}:"
@@ -503,26 +606,51 @@ def cmd_status(config: PkgConfig) -> None:
             print(f"  {GREEN}[OK]{RESET} {name}: {GREEN}{current}{RESET}")
 
 
+def cmd_status(config: PkgConfig) -> None:
+    lock: LockData = load_pkg_lock()
+    sources: Dict[str, SourceConfig] = get_sources(config)
+
+    for source_name, source_config in sources.items():
+        packages = source_config.get("packages", {})
+        if not packages:
+            continue
+
+        print(f"\n{BOLD}{YELLOW}:: {source_name}{RESET}")
+        source_lock: Dict[str, Any] = lock.get(source_name, {})
+
+        status_handler: Optional[StatusHandler] = STATUS_HANDLERS.get(source_name)
+        if status_handler and isinstance(packages, dict):
+            with yaspin(text="checking for updates...", color="cyan"):
+                results: List[StatusResult] = status_handler(packages, source_lock)
+            print_status_results(results)
+        else:
+            for name in packages if isinstance(packages, list) else packages.keys():
+                print_pkg_info(name, source_lock)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Update packages from GitHub releases",
+        description="Meta package manager -- update packages from multiple sources",
         epilog="""\
 package config (~/pkg.json):
-  each entry under "packages" supports:
+  top-level keys are source names (github, cargo, apt, ...).
+  each source has:
+    packages      package definitions (object for github, array for simple sources)
+    vars          variables injected into cmds/pre templates (e.g. install_dir)
+    requires      array of source names that must finish before this source
+
+  github package fields:
     repo          GitHub owner/repo (required)
-    artifact      release asset to download:
-                    - omit to download the release source tarball
-                    - exact name, e.g. "nvim-linux-x86_64.appimage"
-                    - supports {version} templating, e.g. "tmux-{version}.tar.gz"
-    requires      array of package names (from pkg.json) that must be installed
-                  before this package; missing deps cause the package to be skipped
-    pre           array of shell commands to run before download/build
-                  available variables: {install_dir} {version}
-    cmds          array of shell commands to run after downloading (required)
-                  available variables: {artifact} {install_dir} {version} {tmpdir}
+    cmds          shell commands to run after downloading (required)
+    artifact      release asset name (omit for source tarball, supports {version})
+    requires      package deps (bare name = same source, source/name = cross-source)
+    pre           shell commands to run before download
+
+  template variables for cmds: {artifact} {install_dir} {version} {tmpdir} + vars
+  template variables for pre:  {install_dir} {version} + vars
 
 examples:
-  pack                      update all packages
+  pack                      update all packages from all sources
   pack update nvim tmux     update specific packages
   pack update -f nvim       force re-download even if up to date
   pack update -y            update all without prompts

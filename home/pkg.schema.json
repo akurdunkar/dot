@@ -1,0 +1,99 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+        "$schema": {
+            "type": "string"
+        }
+    },
+    "additionalProperties": {
+        "$ref": "#/definitions/source"
+    },
+    "definitions": {
+        "source": {
+            "type": "object",
+            "properties": {
+                "requires": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "Source names that must be fully processed before this source"
+                },
+                "vars": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    },
+                    "description": "Variables injected into cmds and pre templates"
+                },
+                "packages": {
+                    "oneOf": [
+                        {
+                            "$ref": "#/definitions/github_packages"
+                        },
+                        {
+                            "$ref": "#/definitions/simple_packages"
+                        }
+                    ]
+                }
+            },
+            "required": [
+                "packages"
+            ]
+        },
+        "github_packages": {
+            "type": "object",
+            "additionalProperties": {
+                "$ref": "#/definitions/github_package"
+            }
+        },
+        "github_package": {
+            "type": "object",
+            "properties": {
+                "repo": {
+                    "type": "string",
+                    "pattern": "^[^/]+/[^/]+$",
+                    "description": "GitHub owner/repo"
+                },
+                "artifact": {
+                    "type": "string",
+                    "description": "Release asset name, supports {version} templating. Omit for source tarball"
+                },
+                "requires": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "Package deps. Bare name for same source, source/name for cross-source"
+                },
+                "pre": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "Shell commands to run before download"
+                },
+                "cmds": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "Shell commands to run after downloading artifact"
+                }
+            },
+            "required": [
+                "repo",
+                "cmds"
+            ],
+            "additionalProperties": false
+        },
+        "simple_packages": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            },
+            "description": "Simple list of package names (for cargo, apt, etc.)"
+        }
+    }
+}
