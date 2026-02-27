@@ -8,7 +8,7 @@ import os
 import subprocess
 from pathlib import Path
 
-NO_BATTERY_ICON = ""  # No battery / desktop (Nerd Font:   )
+NO_BATTERY_ICON = " "  # No battery / desktop (Nerd Font:   )
 BATTERY_ICON = "󰂂"  # Next to percentage (e.g. " " or "")
 CHARGING_ICON = ""  # When charging (e.g. " " or "")
 
