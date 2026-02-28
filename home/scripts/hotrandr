@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Listen for monitor hotplug events via udev and run autorandr --change."""
+"""Listen for monitor hotplug events via udev and run a script."""
 
+import argparse
 import logging
 import subprocess
-import time
-from dataclasses import dataclass
 
 import pyudev
 
@@ -15,59 +14,30 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-
-@dataclass(frozen=True)
-class Config:
-    max_attempts: int = 10
-    retry_delay: float = 2.5
-    udev_subsystem: str = "drm"
-    hotplug_actions: frozenset[str] = frozenset({"change", "add", "remove"})
+UDEV_SUBSYSTEM = "drm"
+HOTPLUG_ACTIONS = frozenset({"change", "add", "remove"})
 
 
-def run(cmd: list[str], *, capture: bool = False) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(cmd, capture_output=capture, text=True, check=False)
-
-
-def get_current_profile() -> str | None:
-    result = run(["autorandr"], capture=True)
-    for line in result.stdout.splitlines():
-        if "(current)" in line:
-            return line.split()[0]
-    return None
-
-
-def notify(title: str, body: str) -> None:
-    run(["notify-send", "-u", "normal", title, body])
-
-
-def apply_until_changed(old_profile: str | None, cfg: Config) -> None:
-    for attempt in range(1, cfg.max_attempts + 1):
-        run(["autorandr", "--change"])
-        if (current := get_current_profile()) != old_profile:
-            log.info("Profile changed: %s -> %s", old_profile, current)
-            notify("Monitor Layout Changed", f"{old_profile} → {current}")
-            return
-        log.info("Attempt %d/%d: still on '%s'", attempt, cfg.max_attempts, old_profile)
-        time.sleep(cfg.retry_delay)
-    log.warning("Gave up after %d attempts, profile unchanged", cfg.max_attempts)
-
-
-def listen(cfg: Config) -> None:
+def listen(script: str) -> None:
     context = pyudev.Context()
     monitor = pyudev.Monitor.from_netlink(context)
-    monitor.filter_by(subsystem=cfg.udev_subsystem)
+    monitor.filter_by(subsystem=UDEV_SUBSYSTEM)
 
-    log.info("Listening for monitor hotplug events…")
+    log.info("Listening for monitor hotplug events (running '%s' on change)…", script)
 
     for device in iter(monitor.poll, None):
-        if device.action in cfg.hotplug_actions:
-            old_profile = get_current_profile()
-            log.info("[%s] %s (profile: %s)", device.action, device.device_path, old_profile)
-            apply_until_changed(old_profile, cfg)
+        if device.action in HOTPLUG_ACTIONS:
+            log.info("[%s] %s", device.action, device.device_path)
+            result = subprocess.run([script], check=False)
+            if result.returncode != 0:
+                log.warning("'%s' exited with code %d", script, result.returncode)
 
 
 def main() -> None:
-    listen(Config())
+    parser = argparse.ArgumentParser(description="Run a script on monitor hotplug events.")
+    parser.add_argument("script", help="Script to run (must be in PATH or an absolute path)")
+    args = parser.parse_args()
+    listen(args.script)
 
 
 if __name__ == "__main__":
