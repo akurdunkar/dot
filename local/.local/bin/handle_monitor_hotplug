@@ -12,7 +12,7 @@ for ((i = 1; i <= MAX_ATTEMPTS; i++)); do
 	current_layout=$(autorandr_get_current_layout --change)
 	if [[ "$current_layout" != "$initial_layout" ]]; then
 		notify-send -u normal "Monitor Layout Changed" \
-            "$initial_layout → $current_layout" -i $HOME/assets/desktop_icon.png
+			"$initial_layout → $current_layout" -i $HOME/.local/assets/desktop_icon.png
 		exit 0
 	fi
 	sleep 2

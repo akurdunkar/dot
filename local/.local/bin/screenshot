@@ -6,4 +6,4 @@ mkdir -p "$dir"
 filepath="$dir/$(date '+%Y-%m-%d_%H-%M-%S').png"
 
 maim "$@" | tee "$filepath" | xclip -selection clipboard -t image/png &&
-	notify-send -t 700 -i "$HOME/assets/screenshot_icon.png" "Screenshot captured" "$filepath"
+	notify-send -t 700 -i "$HOME/.local/assets/screenshot_icon.png" "Screenshot captured" "$filepath"
