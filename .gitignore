@@ -1,3 +1,4 @@
 gomp
 *.o
 __pycache__
+pkg.lock
