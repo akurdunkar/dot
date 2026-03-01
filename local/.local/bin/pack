@@ -32,7 +32,7 @@ RESET: str = attr("reset")
 
 PKG_JSON: Path = Path.home() / ".local" / "pack" / "pkg.json"
 PKG_LOCK: Path = Path.home() / ".local" / "pack" / "pkg.lock"
-PKG_SCHEMA: Path = Path.home() / "pkg.schema.json"
+PKG_SCHEMA: Path = Path.home() / ".local" / "pack" / "pkg.schema.json"
 BUILD_LOG: Path = Path("/tmp/pack.build.log")
 
 BUILD_LOG_LINES: int = 15
