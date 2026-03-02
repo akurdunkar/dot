@@ -5,6 +5,7 @@
 	feh --bg-scale $HOME/wall.jpg
 	picom --daemon
 	slstatus &
+    pasystray &
 	nm-applet &
 	blueman-applet &
 	dunst --startup-notification true &
