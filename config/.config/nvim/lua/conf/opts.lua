@@ -1,5 +1,6 @@
 -- Globals
 
+vim.g["tmux_navigator_no_mappings"]    = 1
 vim.g["color_coded_enabled "]          = 1
 vim.g["go_def_mapping_enabled"]        = false
 vim.g["fzf_preview_window"]            = {}
