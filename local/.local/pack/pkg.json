@@ -98,6 +98,13 @@
                     "make",
                     "make install"
                 ]
+            },
+            "slides": {
+                "repo": "maaslalani/slides",
+                "cmds": [
+                    "tar xzf {artifact} --strip-components=1",
+                    "go install"
+                ]
             }
         }
     }
