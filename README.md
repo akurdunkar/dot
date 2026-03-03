@@ -3,5 +3,5 @@
 stow it
 
 ```bash
-% stow */ -t ~
+% stow -v */ -t ~
 ```
