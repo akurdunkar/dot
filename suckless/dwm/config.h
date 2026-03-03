@@ -78,8 +78,6 @@ static const Layout layouts[] = {
     { "󰥛 ",      NULL },    /* no layout function means floating behavior */
     { "󰝤 ",      monocle },
     { "󱗼",       grid },
-    { " ",      spiral },
-    { " ",      bstack },
 };
 
 /* key definitions */
