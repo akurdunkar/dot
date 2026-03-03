@@ -1,6 +1,2 @@
-require("conf.lazy")
-require("conf.opts")
-require("conf.autocmds")
-require("conf.mappings")
-require("conf.compe")
-require("conf.lsp")
+require('plugins')
+require('core')
