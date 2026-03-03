@@ -96,7 +96,7 @@ enum {
   NetWMWindowTypeDialog,
   NetClientList,
   NetLast
-};                                           /* EWMH atoms */
+}; /* EWMH atoms */
 enum { Manager, Xembed, XembedInfo, XLast }; /* Xembed atoms */
 enum {
   WMProtocols,
@@ -233,7 +233,7 @@ static void expose(XEvent *e);
 static void focus(Client *c);
 static void focusin(XEvent *e);
 static void focusmon(const Arg *arg);
-static void focusstackvis(const Arg *arg);
+static void focusdir(const Arg *arg);
 static void focusstackhid(const Arg *arg);
 static void focusstack(int inc, int vis);
 static Atom getatomprop(Client *c, Atom prop);
@@ -1123,6 +1123,56 @@ void focusin(XEvent *e) {
     setfocus(selmon->sel);
 }
 
+void focusdir(const Arg *arg) {
+  Client *c = selmon->sel, *best = NULL, *i;
+  int cx, cy, icx, icy, dist, bdist;
+
+  if (!c)
+    return;
+
+  cx = c->x + c->w / 2;
+  cy = c->y + c->h / 2;
+  bdist = c->mon->mw * c->mon->mw + c->mon->mh * c->mon->mh;
+
+  for (i = selmon->clients; i; i = i->next) {
+    if (i == c || !ISVISIBLE(i) || HIDDEN(i))
+      continue;
+
+    icx = i->x + i->w / 2;
+    icy = i->y + i->h / 2;
+
+    switch (arg->i) {
+    case 0:
+      if (icx >= cx)
+        continue;
+      break; /* left */
+    case 1:
+      if (icx <= cx)
+        continue;
+      break; /* right */
+    case 2:
+      if (icy >= cy)
+        continue;
+      break; /* up */
+    case 3:
+      if (icy <= cy)
+        continue;
+      break; /* down */
+    }
+
+    dist = (icx - cx) * (icx - cx) + (icy - cy) * (icy - cy);
+    if (dist < bdist) {
+      bdist = dist;
+      best = i;
+    }
+  }
+
+  if (best) {
+    focus(best);
+    restack(selmon);
+  }
+}
+
 void focusmon(const Arg *arg) {
   Monitor *m;
 
@@ -1134,8 +1184,6 @@ void focusmon(const Arg *arg) {
   selmon = m;
   focus(NULL);
 }
-
-void focusstackvis(const Arg *arg) { focusstack(arg->i, 0); }
 
 void focusstackhid(const Arg *arg) { focusstack(arg->i, 1); }
 
