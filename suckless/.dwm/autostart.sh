@@ -3,7 +3,6 @@
 	source $HOME/.rc
 	source $HOME/.colors
 	feh --bg-scale $HOME/wall.jpg
-	picom --daemon
 	slstatus &
     pasystray &
 	nm-applet &
