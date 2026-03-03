@@ -120,7 +120,7 @@ static Key keys[] = {
   { 0,                                         XF86XK_MonBrightnessDown,    spawn,                 SHCMD("xbacklight -dec 10")},
   { Super | ShiftMask,                         XK_F5,                       spawn,                 SHCMD("reload_keys")},
   { Super,                                     XK_v,                        spawn,                 SHCMD("copyq menu")},
-  { Super,                                     XK_s,                        spawn,                 SHCMD("screenshot")},
+  { Super | ControlMask,                       XK_s,                        spawn,                 SHCMD("screenshot")},
   { Super | ShiftMask,                         XK_s,                        spawn,                 SHCMD("screenshot -s")},
   { Super,                                     XK_t,                        setlayout,             {.v = &layouts[0]} },
   { Super | ShiftMask,                         XK_m,                        setlayout,             {.v = &layouts[2]} },
