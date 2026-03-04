@@ -13,7 +13,7 @@ for ((i = 1; i <= MAX_ATTEMPTS; i++)); do
 	if [[ "$current_layout" != "$initial_layout" ]]; then
 		notify-send -u normal "Monitor Layout Changed" \
 			"$initial_layout → $current_layout" -i $HOME/.local/assets/desktop_icon.png
-		feh --bg-scale ~/wall.jpg
+		feh --bg-scale $HOME/wall.jpg
 		exit 0
 	fi
 	sleep 2
