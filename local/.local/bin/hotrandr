@@ -37,6 +37,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run a script on monitor hotplug events.")
     parser.add_argument("script", help="Script to run (must be in PATH or an absolute path)")
     args = parser.parse_args()
+    result = subprocess.run([args.script], check=False)
+    if result.returncode != 0:
+        log.warning("'%s' exited with code %d", script, result.returncode)
     listen(args.script)
 
 
