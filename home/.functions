@@ -89,7 +89,7 @@ fn() {
 	all_files "$HOME/.config/nvim/" | fzf_cmd | xargs -r -d '\n' "$EDITOR"
 }
 
-envm() {
+init_nvm() {
 	# Node Version Manager
 	# shellcheck source=/dev/null
 	[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" # This loads nvm
@@ -97,7 +97,7 @@ envm() {
 	[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion" # This loads nvm bash_completion
 }
 
-epyenv() {
+init_pyenv() {
 	export PYENV_ROOT="$HOME/.pyenv"
 	[[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
 	eval "$(pyenv init - zsh)"
