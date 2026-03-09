@@ -37,10 +37,6 @@ from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 
-# ---------------------------------------------------------------------------
-# Type aliases & constants
-# ---------------------------------------------------------------------------
-
 PkgConfig = dict[str, Any]
 LockData = dict[str, Any]
 SourceConfig = dict[str, Any]
@@ -61,10 +57,6 @@ BUILD_LOG: Final[Path] = Path("/tmp/pack.build.log")
 HTTP_TIMEOUT: Final[int] = 30
 RESERVED_KEYS: Final[frozenset[str]] = frozenset({"$schema"})
 CONSOLE: Final[Console] = Console()
-
-# ---------------------------------------------------------------------------
-# Data structures
-# ---------------------------------------------------------------------------
 
 
 class LockEntry(TypedDict, total=False):
@@ -176,11 +168,6 @@ class SourceHandler(Protocol):
     ) -> LockEntry: ...
 
 
-# ---------------------------------------------------------------------------
-# Config I/O
-# ---------------------------------------------------------------------------
-
-
 def validate_config(config: PkgConfig) -> None:
     if not PKG_SCHEMA.exists():
         print(f"  {RED}[F]{RESET} {PKG_SCHEMA} not found", file=sys.stderr)
@@ -221,11 +208,6 @@ def save_pkg_lock(lock: LockData) -> None:
     with open(PKG_LOCK, "w", encoding="utf-8") as f:
         json.dump(lock, f, indent=2)
         f.write("\n")
-
-
-# ---------------------------------------------------------------------------
-# Utilities
-# ---------------------------------------------------------------------------
 
 
 def get_sources(config: PkgConfig) -> dict[str, SourceConfig]:
@@ -331,11 +313,6 @@ def resolve_pkg_requires(
     return [parse(r) for r in requires]
 
 
-# ---------------------------------------------------------------------------
-# GitHub helpers
-# ---------------------------------------------------------------------------
-
-
 def get_github_client() -> Github:
     """Create an authenticated GitHub client.
 
@@ -421,11 +398,6 @@ def resolve_artifact(
     if not asset:
         raise PackageError(f"no artifact '{resolved}' found in release assets")
     return asset.browser_download_url, asset.name
-
-
-# ---------------------------------------------------------------------------
-# GitHub source handler
-# ---------------------------------------------------------------------------
 
 
 class GithubSourceHandler:
@@ -529,11 +501,6 @@ class GithubSourceHandler:
             installed_at=datetime.now(timezone.utc).isoformat(),
             url=download_url,
         )
-
-
-# ---------------------------------------------------------------------------
-# Parallel engine
-# ---------------------------------------------------------------------------
 
 
 def _run_build_cmds_captured(
@@ -838,11 +805,6 @@ def _run_parallel_update(
     _install_phase(handler, packages, to_update, ictx)
 
 
-# ---------------------------------------------------------------------------
-# Source handler factory
-# ---------------------------------------------------------------------------
-
-
 def _get_source_handler(
     source_name: str, source_config: SourceConfig
 ) -> SourceHandler | None:
@@ -850,11 +812,6 @@ def _get_source_handler(
     if source_name == "github":
         return GithubSourceHandler(source_config)
     return None
-
-
-# ---------------------------------------------------------------------------
-# Commands
-# ---------------------------------------------------------------------------
 
 
 def cmd_update(args: argparse.Namespace, config: PkgConfig) -> None:
@@ -972,11 +929,6 @@ def cmd_status(config: PkgConfig) -> None:
             )
             for name in names_list:
                 print_pkg_info(name, source_lock)
-
-
-# ---------------------------------------------------------------------------
-# CLI entry point
-# ---------------------------------------------------------------------------
 
 
 def main() -> None:
