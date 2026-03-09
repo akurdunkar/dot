@@ -500,8 +500,21 @@ void arrangemon(Monitor *m) {
 }
 
 void attach(Client *c) {
-  c->next = c->mon->clients;
-  c->mon->clients = c;
+  Client *at;
+  unsigned int n = 0;
+
+  for (at = c->mon->clients; at; at = at->next)
+    if (!at->isfloating && ISVISIBLE(at) && !HIDDEN(at))
+      if (++n >= c->mon->nmaster)
+        break;
+
+  if (at) {
+    c->next = at->next;
+    at->next = c;
+  } else {
+    c->next = c->mon->clients;
+    c->mon->clients = c;
+  }
 }
 
 void attachstack(Client *c) {
@@ -1601,7 +1614,8 @@ Client *nexttiled(Client *c) {
 
 void pop(Client *c) {
   detach(c);
-  attach(c);
+  c->next = c->mon->clients;
+  c->mon->clients = c;
   focus(c);
   arrange(c->mon);
 }
