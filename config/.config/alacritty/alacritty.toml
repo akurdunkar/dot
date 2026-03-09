@@ -22,7 +22,7 @@ blinking = "Never"
 TERM = "xterm-256color"
 
 [font]
-size = 7
+size = 9
 
 [font.normal]
 family = "Ubuntu Mono"
