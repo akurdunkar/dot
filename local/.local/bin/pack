@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
+# pylint: disable=too-many-lines
 
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import (
@@ -29,7 +31,15 @@ import requests
 from colored import attr, fg
 from github import Auth, Github, UnknownObjectException
 from github.Repository import Repository
-from yaspin import yaspin
+from rich.console import Console
+from rich.live import Live
+from rich.spinner import Spinner
+from rich.table import Table
+from rich.text import Text
+
+# ---------------------------------------------------------------------------
+# Type aliases & constants
+# ---------------------------------------------------------------------------
 
 PkgConfig = dict[str, Any]
 LockData = dict[str, Any]
@@ -48,10 +58,13 @@ PKG_LOCK: Final[Path] = Path.home() / ".local" / "pack" / "pkg.lock"
 PKG_SCHEMA: Final[Path] = Path.home() / ".local" / "pack" / "pkg.schema.json"
 BUILD_LOG: Final[Path] = Path("/tmp/pack.build.log")
 
-BUILD_LOG_LINES: Final[int] = 15
 HTTP_TIMEOUT: Final[int] = 30
-
 RESERVED_KEYS: Final[frozenset[str]] = frozenset({"$schema"})
+CONSOLE: Final[Console] = Console()
+
+# ---------------------------------------------------------------------------
+# Data structures
+# ---------------------------------------------------------------------------
 
 
 class LockEntry(TypedDict, total=False):
@@ -79,6 +92,14 @@ class PackageError(Exception):
 
 
 @dataclass
+class LogContext:
+    """Thread-safe wrapper around a shared log file."""
+
+    file: IO[str]
+    lock: threading.Lock
+
+
+@dataclass
 class UpdateRequest:
     """Source-independent parameters forwarded from cmd_update to handlers."""
 
@@ -89,16 +110,75 @@ class UpdateRequest:
 
 
 @dataclass
-class GithubContext:
-    """Shared state threaded through individual GitHub package updates."""
+class ResolveResult:
+    """Result of checking a single package for available updates."""
+
+    name: str
+    current_version: str
+    latest_version: str
+    needs_update: bool
+    extra: dict[str, Any]
+    error: str | None = None
+
+
+@dataclass
+class PackageTask:
+    """Mutable per-package state displayed on the install dashboard."""
+
+    name: str
+    status: str
+    detail: str = ""
+    version: str = ""
+    done_event: threading.Event = field(default_factory=threading.Event)
+    spinner: Spinner = field(default_factory=lambda: Spinner("dots", style="cyan"))
+
+
+@dataclass
+class InstallJob:
+    """Everything needed to install one package in a worker thread."""
+
+    name: str
+    pkg_config: PkgConfig
+    resolved: ResolveResult
+    task: PackageTask
+    deps: list[PackageTask]
+
+
+@dataclass
+class InstallContext:
+    """Shared mutable state for the parallel install phase."""
 
     source_name: str
     source_lock: dict[str, Any]
     full_lock: LockData
-    client: Github
-    auth_token: str | None
-    source_vars: dict[str, str]
-    log: IO[str]
+    lock_mutex: threading.Lock
+    log_ctx: LogContext
+
+
+class SourceHandler(Protocol):
+    """Protocol that source backends implement for parallel updates."""
+
+    def resolve(
+        self,
+        name: str,
+        pkg_config: PkgConfig,
+        current_version: str,
+        force: bool,
+    ) -> ResolveResult: ...
+
+    def install(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self,
+        name: str,
+        pkg_config: PkgConfig,
+        resolved: ResolveResult,
+        task: PackageTask,
+        log_ctx: LogContext,
+    ) -> LockEntry: ...
+
+
+# ---------------------------------------------------------------------------
+# Config I/O
+# ---------------------------------------------------------------------------
 
 
 def validate_config(config: PkgConfig) -> None:
@@ -114,7 +194,7 @@ def validate_config(config: PkgConfig) -> None:
             "/".join(str(p) for p in e.absolute_path) if e.absolute_path else "(root)"
         )
         print(
-            f"  {RED}[F]{RESET} pkg.json validation error at '{path}': {e.message}",
+            f"  {RED}[F]{RESET} pkg.json validation error at" f" '{path}': {e.message}",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -141,6 +221,11 @@ def save_pkg_lock(lock: LockData) -> None:
     with open(PKG_LOCK, "w", encoding="utf-8") as f:
         json.dump(lock, f, indent=2)
         f.write("\n")
+
+
+# ---------------------------------------------------------------------------
+# Utilities
+# ---------------------------------------------------------------------------
 
 
 def get_sources(config: PkgConfig) -> dict[str, SourceConfig]:
@@ -216,96 +301,16 @@ def download_to(resp: requests.Response, dest: Path) -> None:
             f.write(chunk)
 
 
-def download_with_spinner(
-    url: str, dest: Path, label: str, auth_token: str | None = None
-) -> None:
-    headers: dict[str, str] = {}
-    if auth_token:
-        headers["Authorization"] = f"token {auth_token}"
-    with yaspin(text=f"downloading {label}...", color="cyan"):
-        resp: requests.Response = requests.get(
-            url, stream=True, headers=headers, timeout=HTTP_TIMEOUT
-        )
-        resp.raise_for_status()
-        download_to(resp, dest)
-    print(f"  {GREEN}[OK]{RESET} downloaded {label}")
-
-
-def clear_lines(n: int) -> None:
-    if n > 0:
-        sys.stdout.write(f"\033[{n}A\033[J")
-        sys.stdout.flush()
-
-
-def _stream_output(
-    proc: subprocess.Popen[str],
-    buf: deque[str],
-    max_line_len: int,
-    log: IO[str],
-) -> int:
-    """Stream process stdout to terminal and log, returning lines displayed."""
-    assert proc.stdout is not None
-    lines_on_screen: int = 0
-
-    for line in proc.stdout:
-        raw: str = line.rstrip("\n")
-        buf.append(raw)
-        log.write(line)
-
-        clear_lines(lines_on_screen)
-
-        lines_on_screen = len(buf)
-        for buf_line in buf:
-            display: str = buf_line[:max_line_len]
-            sys.stdout.write(f"  {DIM}    {display}{RESET}\n")
-        sys.stdout.flush()
-
-    return lines_on_screen
-
-
-def run_build_cmds(
-    cmds: list[str], variables: dict[str, str], cwd: str, log: IO[str]
-) -> None:
-    term_cols: int = shutil.get_terminal_size((80, 24)).columns
-    max_line_len: int = term_cols - 6
-
-    for i, cmd in enumerate(cmds, 1):
-        expanded: str = cmd.format(**variables)
-        print(f"  {BOLD}[{i}/{len(cmds)}]{RESET} {expanded}")
-        log.write(f"$ {expanded}\n")
-
-        with subprocess.Popen(
-            expanded,
-            shell=True,
-            cwd=cwd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        ) as proc:
-            buf: deque[str] = deque(maxlen=BUILD_LOG_LINES)
-            lines_on_screen: int = 0
-
-            try:
-                lines_on_screen = _stream_output(proc, buf, max_line_len, log)
-            except BaseException:
-                proc.terminate()
-                proc.wait()
-                clear_lines(lines_on_screen)
-                raise
-
-            returncode: int = proc.wait()
-            log.write(f"exit {returncode}\n\n")
-            log.flush()
-
-            clear_lines(lines_on_screen)
-
-            if returncode != 0:
-                for buf_line in buf:
-                    print(f"  {DIM}    {buf_line}{RESET}")
-                print(f"  {DIM}full log: {BUILD_LOG}{RESET}")
-                raise RuntimeError(
-                    f"build command failed (exit {returncode}): {expanded}"
-                )
+def _expand_vars(raw_vars: dict[str, str]) -> dict[str, str]:
+    """Expand ~ in _dir vars and ensure those directories exist."""
+    expanded: dict[str, str] = {
+        k: str(Path(v).expanduser()) if k.endswith("_dir") else v
+        for k, v in raw_vars.items()
+    }
+    for k, v in expanded.items():
+        if k.endswith("_dir"):
+            Path(v).mkdir(parents=True, exist_ok=True)
+    return expanded
 
 
 def resolve_pkg_requires(
@@ -326,21 +331,16 @@ def resolve_pkg_requires(
     return [parse(r) for r in requires]
 
 
-def check_requires(requires: list[str], source_name: str, lock: LockData) -> None:
-    """Raise PackageError if any required package is not installed."""
-    missing: list[str] = [
-        f"{src}/{name}"
-        for src, name in resolve_pkg_requires(requires, source_name)
-        if name not in lock.get(src, {})
-    ]
-    if missing:
-        raise PackageError(f"missing required packages: {', '.join(missing)}")
+# ---------------------------------------------------------------------------
+# GitHub helpers
+# ---------------------------------------------------------------------------
 
 
 def get_github_client() -> Github:
     """Create an authenticated GitHub client.
 
-    Tries GITHUB_TOKEN env var, then gh CLI, then falls back to unauthenticated.
+    Tries GITHUB_TOKEN env var, then gh CLI, then falls back to
+    unauthenticated.
     """
     token: str | None = os.environ.get("GITHUB_TOKEN")
     if token:
@@ -370,7 +370,8 @@ def get_auth_token(g: Github) -> str | None:
 
 @dataclass
 class TagShim:
-    """Minimal release-like wrapper around a Git tag (satisfies ReleaseLike)."""
+    """Minimal release-like wrapper around a Git tag (satisfies
+    ReleaseLike)."""
 
     tag_name: str
     tarball_url: str
@@ -385,7 +386,8 @@ class TagShim:
 
 
 def get_latest_release(repo: Repository) -> ReleaseLike:
-    """Return the latest release, falling back to the most recent by date."""
+    """Return the latest release, falling back to the most recent by
+    date."""
     try:
         return repo.get_latest_release()  # type: ignore[return-value]
     except UnknownObjectException:
@@ -400,14 +402,15 @@ def get_latest_release(repo: Repository) -> ReleaseLike:
     raise RuntimeError(f"no suitable release or tag found for {repo.full_name}")
 
 
-def find_asset(
-    assets: Iterable[ReleaseAsset], artifact: str
-) -> ReleaseAsset | None:
+def find_asset(assets: Iterable[ReleaseAsset], artifact: str) -> ReleaseAsset | None:
     return next((a for a in assets if a.name == artifact), None)
 
 
 def resolve_artifact(
-    latest: ReleaseLike, artifact: str | None, name: str, version: str
+    latest: ReleaseLike,
+    artifact: str | None,
+    name: str,
+    version: str,
 ) -> tuple[str, str]:
     """Resolve the download URL and artifact filename from a release."""
     if artifact is None:
@@ -420,137 +423,368 @@ def resolve_artifact(
     return asset.browser_download_url, asset.name
 
 
-@dataclass(frozen=True)
-class ResolvedArtifact:
-    """Resolved download target for a package update."""
-
-    version: str
-    url: str
-    filename: str
+# ---------------------------------------------------------------------------
+# GitHub source handler
+# ---------------------------------------------------------------------------
 
 
-def _fetch_and_build(
-    name: str,
-    pkg_config: PkgConfig,
-    ctx: GithubContext,
-    resolved: ResolvedArtifact,
-) -> None:
-    """Download, run pre/build commands, and record the installed version."""
-    pre_cmds: list[str] | None = pkg_config.get("pre")
-    build_cmds: list[str] = pkg_config["cmds"]
-    expanded_vars: dict[str, str] = {**ctx.source_vars, "version": resolved.version}
+class GithubSourceHandler:
+    """SourceHandler implementation for GitHub releases."""
 
-    if pre_cmds:
-        print(f"  {DIM}running pre commands...{RESET}")
-        ctx.log.write(f"=== {name} pre ===\n")
-        with tempfile.TemporaryDirectory(prefix=f"pack_{name}_pre_") as pre_tmpdir:
-            run_build_cmds(pre_cmds, expanded_vars, cwd=pre_tmpdir, log=ctx.log)
+    def __init__(self, source_config: SourceConfig) -> None:
+        self._client: Github = get_github_client()
+        self._auth_token: str | None = get_auth_token(self._client)
+        self._source_vars: dict[str, str] = _expand_vars(source_config.get("vars", {}))
 
-    with tempfile.TemporaryDirectory(prefix=f"pack_{name}_") as tmpdir:
-        artifact_path: Path = Path(tmpdir) / resolved.filename
-        download_with_spinner(
-            resolved.url, artifact_path, resolved.filename, ctx.auth_token
+    def resolve(
+        self,
+        name: str,
+        pkg_config: PkgConfig,
+        current_version: str,
+        force: bool,
+    ) -> ResolveResult:
+        try:
+            repo: Repository = self._client.get_repo(pkg_config["repo"])
+            release: ReleaseLike = get_latest_release(repo)
+            latest_version: str = release.tag_name.removeprefix("v")
+            return ResolveResult(
+                name=name,
+                current_version=current_version,
+                latest_version=latest_version,
+                needs_update=force or current_version != latest_version,
+                extra={
+                    "release": release,
+                    "repo": pkg_config["repo"],
+                },
+            )
+        except (RuntimeError, PackageError) as e:
+            return ResolveResult(
+                name=name,
+                current_version=current_version,
+                latest_version="",
+                needs_update=False,
+                extra={},
+                error=str(e),
+            )
+
+    def _download(self, url: str, dest: Path, task: PackageTask) -> None:
+        task.status = "downloading"
+        task.detail = dest.name
+        headers: dict[str, str] = {}
+        if self._auth_token:
+            headers["Authorization"] = f"token {self._auth_token}"
+        resp: requests.Response = requests.get(
+            url, stream=True, headers=headers, timeout=HTTP_TIMEOUT
+        )
+        resp.raise_for_status()
+        download_to(resp, dest)
+
+    def install(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self,
+        name: str,
+        pkg_config: PkgConfig,
+        resolved: ResolveResult,
+        task: PackageTask,
+        log_ctx: LogContext,
+    ) -> LockEntry:
+        download_url: str
+        artifact_name: str
+        download_url, artifact_name = resolve_artifact(
+            resolved.extra["release"],
+            pkg_config.get("artifact"),
+            name,
+            resolved.latest_version,
         )
 
-        variables: dict[str, str] = {
-            **expanded_vars,
-            "artifact": str(artifact_path),
-            "tmpdir": tmpdir,
+        base_vars: dict[str, str] = {
+            **self._source_vars,
+            "version": resolved.latest_version,
         }
 
-        ctx.log.write(f"=== {name} ({pkg_config['repo']}) ===\n")
-        run_build_cmds(build_cmds, variables, cwd=tmpdir, log=ctx.log)
+        pre_cmds: list[str] | None = pkg_config.get("pre")
+        if pre_cmds:
+            task.detail = "running pre commands..."
+            with tempfile.TemporaryDirectory(prefix=f"pack_{name}_pre_") as d:
+                _run_build_cmds_captured(pre_cmds, base_vars, d, task, log_ctx)
 
-    ctx.source_lock[name] = LockEntry(
-        version=resolved.version,
-        artifact=resolved.filename,
-        repo=pkg_config["repo"],
-        installed_at=datetime.now(timezone.utc).isoformat(),
-        url=resolved.url,
-    )
+        with tempfile.TemporaryDirectory(prefix=f"pack_{name}_") as tmpdir:
+            artifact_path: Path = Path(tmpdir) / artifact_name
+            self._download(download_url, artifact_path, task)
+
+            task.status = "building"
+            with log_ctx.lock:
+                log_ctx.file.write(f"=== {name} ({pkg_config['repo']}) ===\n")
+            _run_build_cmds_captured(
+                pkg_config["cmds"],
+                {**base_vars, "artifact": str(artifact_path), "tmpdir": tmpdir},
+                tmpdir,
+                task,
+                log_ctx,
+            )
+
+        return LockEntry(
+            version=resolved.latest_version,
+            artifact=artifact_name,
+            repo=pkg_config["repo"],
+            installed_at=datetime.now(timezone.utc).isoformat(),
+            url=download_url,
+        )
 
 
-def github_update_package(
-    name: str,
-    pkg_config: PkgConfig,
-    ctx: GithubContext,
-    *,
-    force: bool = False,
-    yes: bool = False,
+# ---------------------------------------------------------------------------
+# Parallel engine
+# ---------------------------------------------------------------------------
+
+
+def _run_build_cmds_captured(
+    cmds: list[str],
+    variables: dict[str, str],
+    cwd: str,
+    task: PackageTask,
+    log_ctx: LogContext,
 ) -> None:
-    repo_name: str = pkg_config["repo"]
-    print(f"\n{BOLD}{CYAN}── {name} {RESET}{DIM}({repo_name}){RESET}")
+    """Run build commands, updating *task* for the dashboard."""
+    for i, cmd in enumerate(cmds, 1):
+        expanded: str = cmd.format(**variables)
+        task.detail = f"[{i}/{len(cmds)}] {expanded}"
 
-    requires: list[str] = pkg_config.get("requires", [])
-    if requires:
-        check_requires(requires, ctx.source_name, ctx.full_lock)
+        with log_ctx.lock:
+            log_ctx.file.write(f"$ {expanded}\n")
 
-    current_version: str = ctx.source_lock.get(name, {}).get("version", "none")
-    print(f"  {DIM}installed{RESET}  {current_version}")
+        with subprocess.Popen(
+            expanded,
+            shell=True,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        ) as proc:
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                raw: str = line.rstrip("\n")
+                task.detail = f"[{i}/{len(cmds)}] {raw}"
+                with log_ctx.lock:
+                    log_ctx.file.write(line)
 
-    latest: ReleaseLike = get_latest_release(ctx.client.get_repo(repo_name))
-    latest_version: str = latest.tag_name.removeprefix("v")
-    print(f"  {DIM}latest{RESET}     {latest_version}")
+            returncode: int = proc.wait()
 
-    if current_version == latest_version and not force:
-        print(f"  {GREEN}[OK]{RESET} already up to date")
-        return
+        with log_ctx.lock:
+            log_ctx.file.write(f"exit {returncode}\n\n")
+            log_ctx.file.flush()
 
-    download_url: str
-    artifact_name: str
-    download_url, artifact_name = resolve_artifact(
-        latest, pkg_config.get("artifact"), name, latest_version
-    )
-
-    print(f"  {DIM}artifact{RESET}   {artifact_name}")
-    if not yes and input(
-        f"  {YELLOW}update {name} from {current_version}"
-        f" to {latest_version}? [y/N]{RESET} "
-    ).lower() != "y":
-        print(f"  {YELLOW}[SKIP]{RESET} skipped")
-        return
-
-    target: ResolvedArtifact = ResolvedArtifact(
-        version=latest_version, url=download_url, filename=artifact_name
-    )
-    _fetch_and_build(name, pkg_config, ctx, target)
-    print(f"  {GREEN}[OK]{RESET} installed {name} v{latest_version}")
+        if returncode != 0:
+            raise RuntimeError(f"command failed (exit {returncode}): {expanded}")
 
 
-def _expand_vars(raw_vars: dict[str, str]) -> dict[str, str]:
-    """Expand ~ in _dir vars and ensure those directories exist."""
-    expanded: dict[str, str] = {
-        k: str(Path(v).expanduser()) if k.endswith("_dir") else v
-        for k, v in raw_vars.items()
-    }
-    for k, v in expanded.items():
-        if k.endswith("_dir"):
-            Path(v).mkdir(parents=True, exist_ok=True)
-    return expanded
+def _resolve_phase(
+    handler: SourceHandler,
+    packages: dict[str, PkgConfig],
+    targets: list[str],
+    source_lock: dict[str, Any],
+    force: bool,
+) -> list[ResolveResult]:
+    """Phase 1: check all packages for updates in parallel."""
+    results: list[ResolveResult] = []
+
+    with CONSOLE.status("[cyan]checking for updates...[/cyan]"):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(targets)) as pool:
+            futures: dict[concurrent.futures.Future[ResolveResult], str] = {
+                pool.submit(
+                    handler.resolve,
+                    name,
+                    packages[name],
+                    source_lock.get(name, {}).get("version", "none"),
+                    force,
+                ): name
+                for name in targets
+            }
+            for future in concurrent.futures.as_completed(futures):
+                results.append(future.result())
+
+    order: dict[str, int] = {name: i for i, name in enumerate(targets)}
+    results.sort(key=lambda r: order.get(r.name, 0))
+    return results
 
 
-def handle_github_update(
+def _print_update_summary(
+    to_update: list[ResolveResult],
+    up_to_date: list[ResolveResult],
+    errors: list[ResolveResult],
+) -> None:
+    """Phase 2: print apt-style summary of available updates."""
+    if to_update:
+        max_name: int = max(len(r.name) for r in to_update)
+        print(f"  {BOLD}The following packages will be updated:{RESET}")
+        for r in to_update:
+            print(
+                f"    {CYAN}{r.name:<{max_name}}{RESET}"
+                f"  {r.current_version}"
+                f" {YELLOW}->{RESET} {r.latest_version}"
+            )
+
+    if up_to_date:
+        names: str = ", ".join(
+            f"{r.name} {DIM}{r.current_version}{RESET}" for r in up_to_date
+        )
+        print(f"  {BOLD}Up to date:{RESET} {names}")
+
+    if errors:
+        print(f"  {BOLD}{RED}Errors:{RESET}")
+        for r in errors:
+            print(f"    {RED}{r.name}{RESET}: {r.error}")
+
+
+def _build_dashboard(tasks: list[PackageTask], max_name: int) -> Table:
+    """Build a rich Table showing current install progress."""
+    table: Table = Table.grid(padding=(0, 1))
+    for task in tasks:
+        icon: Text | Spinner
+        if task.status in ("downloading", "building"):
+            icon = task.spinner
+        elif task.status == "done":
+            icon = Text("✓", style="green")
+        elif task.status == "failed":
+            icon = Text("✗", style="red")
+        else:
+            icon = Text("◌", style="dim")
+
+        name_style: str = "bold" if task.status in ("downloading", "building") else ""
+        detail_style: str = "red" if task.status == "failed" else "dim"
+        table.add_row(
+            Text("  "),
+            icon,
+            Text(f" {task.name:<{max_name}} ", style=name_style),
+            Text(
+                task.detail,
+                style=detail_style,
+                overflow="ellipsis",
+                no_wrap=True,
+            ),
+        )
+    return table
+
+
+def _build_install_jobs(
+    packages: dict[str, PkgConfig],
+    to_update: list[ResolveResult],
+    tasks: dict[str, PackageTask],
     source_name: str,
+) -> list[InstallJob]:
+    """Create InstallJob list with dependency info for each package."""
+    update_names: set[str] = set(tasks.keys())
+    jobs: list[InstallJob] = []
+    for r in to_update:
+        requires: list[str] = packages[r.name].get("requires", [])
+        dep_tasks: list[PackageTask] = [
+            tasks[dep_name]
+            for src, dep_name in resolve_pkg_requires(requires, source_name)
+            if src == source_name and dep_name in update_names
+        ]
+        jobs.append(
+            InstallJob(
+                name=r.name,
+                pkg_config=packages[r.name],
+                resolved=r,
+                task=tasks[r.name],
+                deps=dep_tasks,
+            )
+        )
+    return jobs
+
+
+def _install_worker(
+    handler: SourceHandler,
+    job: InstallJob,
+    ictx: InstallContext,
+) -> None:
+    """Phase 3 worker: install a single package in a thread."""
+    task: PackageTask = job.task
+    try:
+        for dep in job.deps:
+            dep.done_event.wait()
+            if dep.status == "failed":
+                raise PackageError(f"dependency {dep.name} failed")
+
+        entry: LockEntry = handler.install(
+            job.name,
+            job.pkg_config,
+            job.resolved,
+            task,
+            ictx.log_ctx,
+        )
+
+        with ictx.lock_mutex:
+            ictx.source_lock[job.name] = entry
+
+        task.status = "done"
+        task.detail = f"v{job.resolved.latest_version}"
+        task.version = job.resolved.latest_version
+    except (
+        PackageError,
+        RuntimeError,
+        OSError,
+        requests.RequestException,
+    ) as e:
+        task.status = "failed"
+        task.detail = str(e)
+    finally:
+        task.done_event.set()
+
+
+def _install_phase(
+    handler: SourceHandler,
+    packages: dict[str, PkgConfig],
+    to_update: list[ResolveResult],
+    ictx: InstallContext,
+) -> None:
+    """Phase 3: download and build packages in parallel with a live
+    dashboard."""
+    tasks: dict[str, PackageTask] = {
+        r.name: PackageTask(name=r.name, status="pending", detail="waiting...")
+        for r in to_update
+    }
+    task_list: list[PackageTask] = [tasks[r.name] for r in to_update]
+    max_name: int = max(len(t.name) for t in task_list)
+    jobs: list[InstallJob] = _build_install_jobs(
+        packages, to_update, tasks, ictx.source_name
+    )
+
+    with Live(
+        _build_dashboard(task_list, max_name),
+        refresh_per_second=10,
+        console=CONSOLE,
+    ) as live:
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=max(1, len(jobs))
+        ) as pool:
+            futures: list[concurrent.futures.Future[None]] = [
+                pool.submit(_install_worker, handler, job, ictx) for job in jobs
+            ]
+            pending: set[concurrent.futures.Future[None]] = set(futures)
+            while pending:
+                _done, pending = concurrent.futures.wait(pending, timeout=0.2)
+                live.update(_build_dashboard(task_list, max_name))
+
+    succeeded: int = sum(1 for t in task_list if t.status == "done")
+    failed: int = sum(1 for t in task_list if t.status == "failed")
+    if failed:
+        print(f"\n  {succeeded} installed," f" {RED}{failed} failed{RESET}")
+        print(f"  {DIM}full log: {BUILD_LOG}{RESET}")
+    else:
+        print(f"\n  {GREEN}{succeeded} installed{RESET}")
+
+
+def _run_parallel_update(
+    source_name: str,
+    handler: SourceHandler,
     source_config: SourceConfig,
     lock: LockData,
     req: UpdateRequest,
 ) -> None:
+    """Orchestrate three-phase parallel update for one source."""
     packages: dict[str, PkgConfig] = source_config.get("packages", {})
     if not isinstance(packages, dict):
         return
-
-    source_vars: dict[str, str] = _expand_vars(source_config.get("vars", {}))
-
-    g: Github = get_github_client()
-    ctx: GithubContext = GithubContext(
-        source_name=source_name,
-        source_lock=lock.setdefault(source_name, {}),
-        full_lock=lock,
-        client=g,
-        auth_token=get_auth_token(g),
-        source_vars=source_vars,
-        log=req.log,
-    )
 
     if req.filter_packages is not None:
         targets: list[str] = [p for p in req.filter_packages if p in packages]
@@ -561,12 +795,7 @@ def handle_github_update(
         return
 
     def get_pkg_requires(name: str) -> list[str]:
-        """Extract same-source deps for topo sort.
-
-        Bare names pass through; qualified refs (e.g. "github/rustup")
-        are included only if they belong to this source, stripped to
-        the bare name so topo_sort can order them.
-        """
+        """Extract same-source deps for topo-sort expansion."""
         return [
             r if "/" not in r else r.split("/", 1)[1]
             for r in packages.get(name, {}).get("requires", [])
@@ -574,61 +803,64 @@ def handle_github_update(
         ]
 
     targets = topo_sort(targets, get_pkg_requires, set(packages.keys()))
+    source_lock: dict[str, Any] = lock.setdefault(source_name, {})
 
-    force_set: set[str] = set(targets) if req.force else set()
+    results: list[ResolveResult] = _resolve_phase(
+        handler, packages, targets, source_lock, req.force
+    )
 
-    for name in targets:
-        try:
-            github_update_package(
-                name,
-                packages[name],
-                ctx,
-                force=name in force_set,
-                yes=req.yes,
-            )
-        except (PackageError, RuntimeError, requests.RequestException) as e:
-            print(f"  {RED}[F]{RESET} {e}", file=sys.stderr)
+    to_update: list[ResolveResult] = [
+        r for r in results if r.needs_update and r.error is None
+    ]
+    up_to_date: list[ResolveResult] = [
+        r for r in results if not r.needs_update and r.error is None
+    ]
+    errors: list[ResolveResult] = [r for r in results if r.error is not None]
+
+    _print_update_summary(to_update, up_to_date, errors)
+
+    if not to_update:
+        return
+
+    if not req.yes:
+        answer: str = input(f"  {len(to_update)} to update. Proceed? [Y/n] ")
+        if answer.strip().lower() == "n":
+            print(f"  {DIM}aborted{RESET}")
+            return
+
+    ictx: InstallContext = InstallContext(
+        source_name=source_name,
+        source_lock=source_lock,
+        full_lock=lock,
+        lock_mutex=threading.Lock(),
+        log_ctx=LogContext(file=req.log, lock=threading.Lock()),
+    )
+    _install_phase(handler, packages, to_update, ictx)
 
 
-def github_get_status(
-    packages: dict[str, PkgConfig], source_lock: dict[str, Any]
-) -> list[StatusResult]:
-    g: Github = get_github_client()
-    results: list[StatusResult] = []
-
-    for name, pkg_config in packages.items():
-        current_version: str = source_lock.get(name, {}).get("version", "none")
-        try:
-            repo: Repository = g.get_repo(pkg_config["repo"])
-            latest: ReleaseLike = get_latest_release(repo)
-            latest_version: str = latest.tag_name.removeprefix("v")
-            results.append((name, current_version, latest_version, None))
-        except (RuntimeError, PackageError) as e:
-            results.append((name, current_version, None, e))
-
-    return results
+# ---------------------------------------------------------------------------
+# Source handler factory
+# ---------------------------------------------------------------------------
 
 
-UpdateHandler = Callable[[str, SourceConfig, LockData, UpdateRequest], None]
+def _get_source_handler(
+    source_name: str, source_config: SourceConfig
+) -> SourceHandler | None:
+    """Create the appropriate SourceHandler for a given source name."""
+    if source_name == "github":
+        return GithubSourceHandler(source_config)
+    return None
 
-StatusResult = tuple[str, str, str | None, Exception | None]
-StatusHandler = Callable[[dict[str, PkgConfig], dict[str, Any]], list[StatusResult]]
 
-SOURCE_HANDLERS: Final[dict[str, UpdateHandler]] = {
-    "github": handle_github_update,
-}
-
-STATUS_HANDLERS: Final[dict[str, StatusHandler]] = {
-    "github": github_get_status,
-}
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
 
 
 def cmd_update(args: argparse.Namespace, config: PkgConfig) -> None:
     lock: LockData = load_pkg_lock()
     sources: dict[str, SourceConfig] = get_sources(config)
-
     filter_packages: list[str] | None = args.packages if args.packages else None
-
     ordered_sources: list[str] = sort_sources(sources)
 
     with open(BUILD_LOG, "w", encoding="utf-8") as log:
@@ -639,16 +871,24 @@ def cmd_update(args: argparse.Namespace, config: PkgConfig) -> None:
             filter_packages=filter_packages,
         )
         for source_name in ordered_sources:
-            handler: UpdateHandler | None = SOURCE_HANDLERS.get(source_name)
+            handler: SourceHandler | None = _get_source_handler(
+                source_name, sources[source_name]
+            )
             if handler is None:
                 print(
-                    f"\n{DIM}skipping unknown source: {source_name}{RESET}",
+                    f"\n{DIM}skipping unknown source:" f" {source_name}{RESET}",
                     file=sys.stderr,
                 )
                 continue
 
             print(f"\n{BOLD}{YELLOW}:: {source_name}{RESET}")
-            handler(source_name, sources[source_name], lock, req)
+            _run_parallel_update(
+                source_name,
+                handler,
+                sources[source_name],
+                lock,
+                req,
+            )
 
     save_pkg_lock(lock)
 
@@ -660,7 +900,7 @@ def print_pkg_info(name: str, source_lock: dict[str, Any]) -> None:
         version: str = info.get("version", "?")
         ts: str = info.get("installed_at", "")
         suffix: str = f" {DIM}(installed {ts}){RESET}" if ts else ""
-        print(f"  {CYAN}{name}{RESET}: {GREEN}v{version}{RESET}{suffix}")
+        print(f"  {CYAN}{name}{RESET}:" f" {GREEN}v{version}{RESET}{suffix}")
     else:
         print(f"  {CYAN}{name}{RESET}: {DIM}not installed{RESET}")
 
@@ -684,17 +924,24 @@ def cmd_list(config: PkgConfig) -> None:
             print_pkg_info(name, source_lock)
 
 
-def print_status_results(results: list[StatusResult]) -> None:
-    for name, current, latest, err in results:
-        if err:
-            print(f"  {RED}[F]{RESET} {name}: {current}" f" {DIM}(error: {err}){RESET}")
-        elif current != latest:
+def _print_status_results(results: list[ResolveResult]) -> None:
+    """Print resolve results in the status format."""
+    for r in results:
+        if r.error:
             print(
-                f"  {YELLOW}[NEW]{RESET} {BOLD}{name}{RESET}:"
-                f" {current} {YELLOW}->{RESET} {latest}"
+                f"  {RED}[F]{RESET} {r.name}: {r.current_version}"
+                f" {DIM}(error: {r.error}){RESET}"
+            )
+        elif r.needs_update:
+            print(
+                f"  {YELLOW}[NEW]{RESET} {BOLD}{r.name}{RESET}:"
+                f" {r.current_version}"
+                f" {YELLOW}->{RESET} {r.latest_version}"
             )
         else:
-            print(f"  {GREEN}[OK]{RESET} {name}: {GREEN}{current}{RESET}")
+            print(
+                f"  {GREEN}[OK]{RESET} {r.name}:" f" {GREEN}{r.current_version}{RESET}"
+            )
 
 
 def cmd_status(config: PkgConfig) -> None:
@@ -709,19 +956,34 @@ def cmd_status(config: PkgConfig) -> None:
         print(f"\n{BOLD}{YELLOW}:: {source_name}{RESET}")
         source_lock: dict[str, Any] = lock.get(source_name, {})
 
-        status_handler: StatusHandler | None = STATUS_HANDLERS.get(source_name)
-        if status_handler and isinstance(packages, dict):
-            with yaspin(text="checking for updates...", color="cyan"):
-                results: list[StatusResult] = status_handler(packages, source_lock)
-            print_status_results(results)
+        handler: SourceHandler | None = _get_source_handler(source_name, source_config)
+        if handler and isinstance(packages, dict):
+            results: list[ResolveResult] = _resolve_phase(
+                handler,
+                packages,
+                list(packages.keys()),
+                source_lock,
+                force=False,
+            )
+            _print_status_results(results)
         else:
-            for name in packages if isinstance(packages, list) else packages.keys():
+            names_list: list[str] = (
+                list(packages.keys()) if isinstance(packages, dict) else packages
+            )
+            for name in names_list:
                 print_pkg_info(name, source_lock)
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point
+# ---------------------------------------------------------------------------
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Meta package manager -- update packages from multiple sources",
+        description=(
+            "Meta package manager -- update packages from" " multiple sources"
+        ),
         epilog="""\
 package config (~/pkg.json):
   top-level keys are source names (github, cargo, apt, ...).
@@ -749,15 +1011,17 @@ examples:
   pack list                 show installed versions from the lockfile""",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    sub: argparse._SubParsersAction[argparse.ArgumentParser] = (
-        parser.add_subparsers(dest="command")
+    sub: argparse._SubParsersAction[argparse.ArgumentParser] = parser.add_subparsers(
+        dest="command"
     )
 
     p_update: argparse.ArgumentParser = sub.add_parser(
         "update", help="download and install latest releases"
     )
     p_update.add_argument(
-        "packages", nargs="*", help="packages to update (default: all)"
+        "packages",
+        nargs="*",
+        help="packages to update (default: all)",
     )
     p_update.add_argument(
         "-f",
@@ -772,8 +1036,14 @@ examples:
         help="skip confirmation prompts",
     )
 
-    sub.add_parser("list", help="show installed packages and versions from ~/pkg.lock")
-    sub.add_parser("status", help="check for available updates without installing")
+    sub.add_parser(
+        "list",
+        help="show installed packages and versions from ~/pkg.lock",
+    )
+    sub.add_parser(
+        "status",
+        help="check for available updates without installing",
+    )
 
     args: argparse.Namespace = parser.parse_args()
     config: PkgConfig = load_pkg_json()
@@ -796,6 +1066,11 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print(f"\n{DIM}aborted{RESET}")
         sys.exit(130)
-    except (PackageError, RuntimeError, OSError, requests.RequestException) as e:
+    except (
+        PackageError,
+        RuntimeError,
+        OSError,
+        requests.RequestException,
+    ) as e:
         print(f"{RED}[F]{RESET} {e}", file=sys.stderr)
         sys.exit(1)
