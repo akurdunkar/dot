@@ -4,6 +4,8 @@
 import argparse
 import logging
 import subprocess
+import os
+import sys
 
 import pyudev
 
@@ -35,7 +37,9 @@ def listen(script: str) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run a script on monitor hotplug events.")
+    parser = argparse.ArgumentParser(
+        description="Run a script on monitor hotplug events."
+    )
     parser.add_argument(
         "script",
         nargs="?",
@@ -50,4 +54,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    if not os.environ.get("DISPLAY"):
+        sys.exit("No DISPLAY, exiting")
     main()
