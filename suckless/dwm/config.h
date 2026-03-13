@@ -32,6 +32,7 @@ static const char *colors[][3]      = {
     /*              fg                 bg                 border   */
    [SchemeNorm] = { col_statusbar_fg,  col_statusbar_bg, col_border},
    [SchemeSel]  = { col_primary_fg,    col_primary_bg  , col_border_sel},
+   [SchemeHid]  = { col_primary_bg,    col_statusbar_bg, col_border},
 };
 
 /* tagging */
@@ -123,7 +124,6 @@ static Key keys[] = {
   { Super,                                     XK_t,                        setlayout,             {.v = &layouts[0]} },
   { Super | ShiftMask,                         XK_m,                        setlayout,             {.v = &layouts[2]} },
   { Super,                                     XK_g,                        setlayout,             {.v = &layouts[3]} },
-  { Super,                                     XK_b,                        setlayout,             {.v = &layouts[5]} },
   { Alt,                                       XK_b,                        togglebar,             {0} },
   { Super,                                     XK_h,                        focusdir,              {.i = 0 } },
   { Super,                                     XK_j,                        focusdir,              {.i = 3 } },

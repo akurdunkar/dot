@@ -71,12 +71,11 @@
 #define XEMBED_MODALITY_ON 10
 
 #define XEMBED_MAPPED (1 << 0)
-#define XEMBED_WINDOW_ACTIVATE 1
 #define XEMBED_WINDOW_DEACTIVATE 2
 
 #define VERSION_MAJOR 0
 #define VERSION_MINOR 0
-#define XEMBED_EMBEDDED_VERSION (VERSION_MAJOR << 16) | VERSION_MINOR
+#define XEMBED_EMBEDDED_VERSION ((VERSION_MAJOR << 16) | VERSION_MINOR)
 
 /* enums */
 enum { CurNormal, CurResize, CurMove, CurLast }; /* cursor */
@@ -883,7 +882,7 @@ int drawstatusbar(Monitor *m, int bh, char *stext) {
   char *p;
 
   len = strlen(stext) + 1;
-  if (!(text = (char *)malloc(sizeof(char) * len)))
+  if (!(text = malloc(len)))
     die("malloc");
   p = text;
   memcpy(text, stext, len);
@@ -1291,7 +1290,7 @@ unsigned int getsystraywidth() {
   if (showsystray)
     for (i = systray->icons; i; w += i->w + systrayspacing, i = i->next)
       ;
-  return w ? w + systrayspacing : 1;
+  return w ? w + systrayspacing : 0;
 }
 
 int gettextprop(Window w, Atom atom, char *text, unsigned int size) {
@@ -1319,39 +1318,33 @@ int gettextprop(Window w, Atom atom, char *text, unsigned int size) {
 }
 
 void grabbuttons(Client *c, int focused) {
+  unsigned int i, j;
+  unsigned int modifiers[] = {0, LockMask, numlockmask, numlockmask | LockMask};
   updatenumlockmask();
-  {
-    unsigned int i, j;
-    unsigned int modifiers[] = {0, LockMask, numlockmask,
-                                numlockmask | LockMask};
-    XUngrabButton(dpy, AnyButton, AnyModifier, c->win);
-    if (!focused)
-      XGrabButton(dpy, AnyButton, AnyModifier, c->win, False, BUTTONMASK,
-                  GrabModeSync, GrabModeSync, None, None);
-    for (i = 0; i < LENGTH(buttons); i++)
-      if (buttons[i].click == ClkClientWin)
-        for (j = 0; j < LENGTH(modifiers); j++)
-          XGrabButton(dpy, buttons[i].button, buttons[i].mask | modifiers[j],
-                      c->win, False, BUTTONMASK, GrabModeAsync, GrabModeSync,
-                      None, None);
-  }
+  XUngrabButton(dpy, AnyButton, AnyModifier, c->win);
+  if (!focused)
+    XGrabButton(dpy, AnyButton, AnyModifier, c->win, False, BUTTONMASK,
+                GrabModeSync, GrabModeSync, None, None);
+  for (i = 0; i < LENGTH(buttons); i++)
+    if (buttons[i].click == ClkClientWin)
+      for (j = 0; j < LENGTH(modifiers); j++)
+        XGrabButton(dpy, buttons[i].button, buttons[i].mask | modifiers[j],
+                    c->win, False, BUTTONMASK, GrabModeAsync, GrabModeSync,
+                    None, None);
 }
 
 void grabkeys(void) {
-  updatenumlockmask();
-  {
-    unsigned int i, j;
-    unsigned int modifiers[] = {0, LockMask, numlockmask,
-                                numlockmask | LockMask};
-    KeyCode code;
+  unsigned int i, j;
+  unsigned int modifiers[] = {0, LockMask, numlockmask, numlockmask | LockMask};
+  KeyCode code;
 
-    XUngrabKey(dpy, AnyKey, AnyModifier, root);
-    for (i = 0; i < LENGTH(keys); i++)
-      if ((code = XKeysymToKeycode(dpy, keys[i].keysym)))
-        for (j = 0; j < LENGTH(modifiers); j++)
-          XGrabKey(dpy, code, keys[i].mod | modifiers[j], root, True,
-                   GrabModeAsync, GrabModeAsync);
-  }
+  updatenumlockmask();
+  XUngrabKey(dpy, AnyKey, AnyModifier, root);
+  for (i = 0; i < LENGTH(keys); i++)
+    if ((code = XKeysymToKeycode(dpy, keys[i].keysym)))
+      for (j = 0; j < LENGTH(modifiers); j++)
+        XGrabKey(dpy, code, keys[i].mod | modifiers[j], root, True,
+                 GrabModeAsync, GrabModeAsync);
 }
 
 void hide(const Arg *arg) {
@@ -1365,7 +1358,7 @@ void hidewin(Client *c) {
     return;
 
   Window w = c->win;
-  static XWindowAttributes ra, ca;
+  XWindowAttributes ra, ca;
 
   // more or less taken directly from blackbox's hide() function
   XGrabServer(dpy);
@@ -1666,16 +1659,12 @@ void propertynotify(XEvent *e) {
 }
 
 void quit(const Arg *arg) {
-  // fix: reloading dwm keeps all the hidden clients hidden
   Monitor *m;
   Client *c;
-  for (m = mons; m; m = m->next) {
-    if (m) {
-      for (c = m->stack; c; c = c->next)
-        if (c && HIDDEN(c))
-          showwin(c);
-    }
-  }
+  for (m = mons; m; m = m->next)
+    for (c = m->stack; c; c = c->snext)
+      if (HIDDEN(c))
+        showwin(c);
 
   running = 0;
 }
@@ -2141,7 +2130,7 @@ void spawn(const Arg *arg) {
     execvp(((char **)arg->v)[0], (char **)arg->v);
     fprintf(stderr, "dwm: execvp %s", ((char **)arg->v)[0]);
     perror(" failed");
-    exit(EXIT_SUCCESS);
+    exit(EXIT_FAILURE);
   }
 }
 
@@ -2220,10 +2209,8 @@ void togglebar(const Arg *arg) {
     XWindowChanges wc;
     if (!selmon->showbar)
       wc.y = -bh;
-    else if (selmon->showbar) {
-      wc.y = 0;
-      if (!selmon->topbar)
-        wc.y = selmon->mh - bh;
+    else {
+      wc.y = selmon->topbar ? 0 : selmon->mh - bh;
     }
     XConfigureWindow(dpy, systray->win, CWY, &wc);
   }
@@ -2482,10 +2469,8 @@ int updategeom(void) {
       updatebarpos(mons);
     }
   }
-  if (dirty) {
-    selmon = mons;
+  if (dirty)
     selmon = wintomon(root);
-  }
   return dirty;
 }
 

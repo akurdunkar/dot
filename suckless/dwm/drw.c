@@ -191,11 +191,6 @@ Clr *drw_scm_create(Drw *drw, const char *clrnames[], size_t clrcount) {
   return ret;
 }
 
-void drw_setfontset(Drw *drw, Fnt *set) {
-  if (drw)
-    drw->fonts = set;
-}
-
 void drw_setscheme(Drw *drw, Clr *scm) {
   if (drw)
     drw->scheme = scm;
