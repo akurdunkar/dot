@@ -6,25 +6,6 @@ vim.g["go_def_mapping_enabled"]        = false
 vim.g["fzf_preview_window"]            = {}
 vim.g["fzf_layout"]                    = { down = '25%' }
 
--- WSL Interopt
-
-if vim.fn.has("wsl") == 1 then
-    vim.cmd [[
-        let g:clipboard = {
-          \   'name': 'WslClipboard',
-          \   'copy': {
-          \      '+': 'clip.exe',
-          \      '*': 'clip.exe',
-          \    },
-          \   'paste': {
-          \      '+': 'powershell.exe -c [Console]::Out.Write($(Get-Clipboard -Raw).tostring().replace("`r", ""))',
-          \      '*': 'powershell.exe -c [Console]::Out.Write($(Get-Clipboard -Raw).tostring().replace("`r", ""))',
-          \   },
-          \   'cache_enabled': 0,
-          \ }
-    ]]
-end
-
 -- Colors
 
 vim.cmd [[
