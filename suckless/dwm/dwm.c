@@ -493,8 +493,7 @@ void arrange(Monitor *m) {
 }
 
 void arrangemon(Monitor *m) {
-  snprintf(m->ltsymbol, sizeof(m->ltsymbol), "%s",
-           m->lt[m->sellt]->symbol);
+  snprintf(m->ltsymbol, sizeof(m->ltsymbol), "%s", m->lt[m->sellt]->symbol);
   if (m->lt[m->sellt]->arrange)
     m->lt[m->sellt]->arrange(m);
 }
