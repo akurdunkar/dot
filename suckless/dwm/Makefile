@@ -78,6 +78,7 @@ install: all
 	chmod 755 ${DESTDIR}${PREFIX}/bin/dwm
 	cp -f dwm.sh ${DESTDIR}${PREFIX}/bin
 	chmod 755 ${DESTDIR}${PREFIX}/bin/dwm.sh
+	[ -e ${HOME}/.dwm ] || ln -s ${CURDIR}/.dwm ${HOME}/.dwm
 
 uninstall:
 	rm -f ${DESTDIR}${PREFIX}/bin/dwm ${DESTDIR}${PREFIX}/bin/dwm.sh
