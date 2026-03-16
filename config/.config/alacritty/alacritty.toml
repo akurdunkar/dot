@@ -34,3 +34,4 @@ style = "Regular"
 
 [window]
 opacity = 1
+dynamic_title = false
