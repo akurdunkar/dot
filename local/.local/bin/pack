@@ -581,10 +581,10 @@ def _print_update_summary(
     """Phase 2: print apt-style summary of available updates."""
     if to_update:
         max_name: int = max(len(r.name) for r in to_update)
-        print(f"  {BOLD}The following packages will be updated:{RESET}")
+        print(f"{BOLD}The following packages will be updated:{RESET}")
         for r in to_update:
             print(
-                f"    {CYAN}{r.name:<{max_name}}{RESET}"
+                f"  {CYAN}{r.name:<{max_name}}{RESET}"
                 f"  {r.current_version}"
                 f" {YELLOW}->{RESET} {r.latest_version}"
             )
@@ -593,12 +593,12 @@ def _print_update_summary(
         names: str = ", ".join(
             f"{r.name} {DIM}{r.current_version}{RESET}" for r in up_to_date
         )
-        print(f"  {BOLD}Up to date:{RESET} {names}")
+        print(f"{BOLD}Up to date:{RESET} {names}")
 
     if errors:
-        print(f"  {BOLD}{RED}Errors:{RESET}")
+        print(f"{BOLD}{RED}Errors:{RESET}")
         for r in errors:
-            print(f"    {RED}{r.name}{RESET}: {r.error}")
+            print(f"  {RED}{r.name}{RESET}: {r.error}")
 
 
 def _build_dashboard(tasks: list[PackageTask], max_name: int) -> Table:
@@ -618,7 +618,6 @@ def _build_dashboard(tasks: list[PackageTask], max_name: int) -> Table:
         name_style: str = "bold" if task.status in ("downloading", "building") else ""
         detail_style: str = "red" if task.status == "failed" else "dim"
         table.add_row(
-            Text("  "),
             icon,
             Text(f" {task.name:<{max_name}} ", style=name_style),
             Text(
@@ -735,10 +734,10 @@ def _install_phase(
     succeeded: int = sum(1 for t in task_list if t.status == "done")
     failed: int = sum(1 for t in task_list if t.status == "failed")
     if failed:
-        print(f"\n  {succeeded} installed," f" {RED}{failed} failed{RESET}")
-        print(f"  {DIM}full log: {BUILD_LOG}{RESET}")
+        print(f"{succeeded} installed, {RED}{failed} failed{RESET}")
+        print(f"{DIM}full log: {BUILD_LOG}{RESET}")
     else:
-        print(f"\n  {GREEN}{succeeded} installed{RESET}")
+        print(f"{GREEN}{succeeded} installed{RESET}")
 
 
 def _run_parallel_update(
@@ -790,9 +789,9 @@ def _run_parallel_update(
         return
 
     if not req.yes:
-        answer: str = input(f"  {len(to_update)} to update. Proceed? [Y/n] ")
+        answer: str = input(f"{len(to_update)} to update. Proceed? [Y/n] ")
         if answer.strip().lower() == "n":
-            print(f"  {DIM}aborted{RESET}")
+            print(f"{DIM}aborted{RESET}")
             return
 
     ictx: InstallContext = InstallContext(
@@ -833,12 +832,12 @@ def cmd_update(args: argparse.Namespace, config: PkgConfig) -> None:
             )
             if handler is None:
                 print(
-                    f"\n{DIM}skipping unknown source:" f" {source_name}{RESET}",
+                    f"{DIM}skipping unknown source: {source_name}{RESET}",
                     file=sys.stderr,
                 )
                 continue
 
-            print(f"\n{BOLD}{YELLOW}:: {source_name}{RESET}")
+            print(f"{BOLD}{YELLOW}:: {source_name}{RESET}")
             _run_parallel_update(
                 source_name,
                 handler,
@@ -857,9 +856,9 @@ def print_pkg_info(name: str, source_lock: dict[str, Any]) -> None:
         version: str = info.get("version", "?")
         ts: str = info.get("installed_at", "")
         suffix: str = f" {DIM}(installed {ts}){RESET}" if ts else ""
-        print(f"  {CYAN}{name}{RESET}:" f" {GREEN}v{version}{RESET}{suffix}")
+        print(f"{CYAN}{name}{RESET}: {GREEN}v{version}{RESET}{suffix}")
     else:
-        print(f"  {CYAN}{name}{RESET}: {DIM}not installed{RESET}")
+        print(f"{CYAN}{name}{RESET}: {DIM}not installed{RESET}")
 
 
 def cmd_list(config: PkgConfig) -> None:
@@ -871,7 +870,7 @@ def cmd_list(config: PkgConfig) -> None:
         if not packages:
             continue
 
-        print(f"\n{BOLD}{YELLOW}:: {source_name}{RESET}")
+        print(f"{BOLD}{YELLOW}:: {source_name}{RESET}")
         source_lock: dict[str, Any] = lock.get(source_name, {})
         names: list[str] = (
             list(packages.keys()) if isinstance(packages, dict) else packages
@@ -886,18 +885,18 @@ def _print_status_results(results: list[ResolveResult]) -> None:
     for r in results:
         if r.error:
             print(
-                f"  {RED}[F]{RESET} {r.name}: {r.current_version}"
+                f"{RED}[F]{RESET} {r.name}: {r.current_version}"
                 f" {DIM}(error: {r.error}){RESET}"
             )
         elif r.needs_update:
             print(
-                f"  {YELLOW}[NEW]{RESET} {BOLD}{r.name}{RESET}:"
+                f"{YELLOW}[NEW]{RESET} {BOLD}{r.name}{RESET}:"
                 f" {r.current_version}"
                 f" {YELLOW}->{RESET} {r.latest_version}"
             )
         else:
             print(
-                f"  {GREEN}[OK]{RESET} {r.name}:" f" {GREEN}{r.current_version}{RESET}"
+                f"{GREEN}[OK]{RESET} {r.name}: {GREEN}{r.current_version}{RESET}"
             )
 
 
@@ -910,7 +909,7 @@ def cmd_status(config: PkgConfig) -> None:
         if not packages:
             continue
 
-        print(f"\n{BOLD}{YELLOW}:: {source_name}{RESET}")
+        print(f"{BOLD}{YELLOW}:: {source_name}{RESET}")
         source_lock: dict[str, Any] = lock.get(source_name, {})
 
         handler: SourceHandler | None = _get_source_handler(source_name, source_config)
