@@ -49,9 +49,9 @@ RED: Final[str] = fg("red")
 BOLD: Final[str] = attr("bold")
 RESET: Final[str] = attr("reset")
 
-PKG_JSON: Final[Path] = Path.home() / ".local" / "pack" / "pkg.json"
-PKG_LOCK: Final[Path] = Path.home() / ".local" / "pack" / "pkg.lock"
-PKG_SCHEMA: Final[Path] = Path.home() / ".local" / "pack" / "pkg.schema.json"
+PKG_JSON: Final[Path] = Path.home() / ".local" / "share" / "pack" / "pkg.json"
+PKG_LOCK: Final[Path] = Path.home() / ".local" / "share" / "pack" / "pkg.lock"
+PKG_SCHEMA: Final[Path] = Path.home() / ".local" / "share" / "pack" / "pkg.schema.json"
 BUILD_LOG: Final[Path] = Path("/tmp/pack.build.log")
 
 HTTP_TIMEOUT: Final[int] = 30
