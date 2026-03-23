@@ -1,5 +1,24 @@
 {
     "$schema": "./pkg.schema.json",
+    "apt": {
+        "packages": [
+            "cmake",
+            "freeglut3-dev",
+            "libgl1-mesa-dev",
+            "libglew-dev",
+            "libglm-dev",
+            "libglu1-mesa-dev",
+            "libjpeg-turbo8-dev",
+            "libpng-dev",
+            "libwebp-dev",
+            "libx11-dev",
+            "libxcomposite-dev",
+            "libxext-dev",
+            "libxfixes-dev",
+            "libxrandr-dev",
+            "libxrender-dev"
+        ]
+    },
     "github": {
         "vars": {
             "install_dir": "~/.local/bin"
@@ -80,6 +99,23 @@
             },
             "slop": {
                 "repo": "naelstrof/slop",
+                "requires": [
+                    "apt/cmake",
+                    "apt/freeglut3-dev",
+                    "apt/libgl1-mesa-dev",
+                    "apt/libglew-dev",
+                    "apt/libglm-dev",
+                    "apt/libglu1-mesa-dev",
+                    "apt/libjpeg-turbo8-dev",
+                    "apt/libpng-dev",
+                    "apt/libwebp-dev",
+                    "apt/libx11-dev",
+                    "apt/libxcomposite-dev",
+                    "apt/libxext-dev",
+                    "apt/libxfixes-dev",
+                    "apt/libxrandr-dev",
+                    "apt/libxrender-dev"
+                ],
                 "cmds": [
                     "tar xzf {artifact} --strip-components=1",
                     "cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$HOME/.local ./",

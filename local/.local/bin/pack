@@ -266,6 +266,32 @@ def topo_sort(
     return ordered
 
 
+def _infer_source_requires(sources: dict[str, SourceConfig]) -> None:
+    """Auto-add source-level requires inferred from cross-source package deps.
+
+    If any package in source X has requires: ["Y/pkg"], source X implicitly
+    requires source Y.  Mutates source configs in place.
+    """
+    for source_name, source_config in sources.items():
+        packages: dict[str, Any] | list[str] = source_config.get("packages", {})
+        if not isinstance(packages, dict):
+            continue
+
+        inferred: set[str] = set()
+        for pkg_config in packages.values():
+            for req in pkg_config.get("requires", []):
+                src: str
+                _: str
+                name: str
+                src, _, name = req.partition("/")
+                if name and src != source_name and src in sources:
+                    inferred.add(src)
+
+        if inferred:
+            existing: set[str] = set(source_config.get("requires", []))
+            source_config["requires"] = sorted(existing | inferred)
+
+
 def sort_sources(sources: dict[str, SourceConfig]) -> list[str]:
     """Topo-sort source names based on source-level requires."""
     names: list[str] = list(sources.keys())
@@ -503,6 +529,116 @@ class GithubSourceHandler:
         )
 
 
+class AptSourceHandler:
+    """SourceHandler implementation for apt packages."""
+
+    parallel: bool = False
+
+    def resolve(  # pylint: disable=unused-argument
+        self,
+        name: str,
+        pkg_config: PkgConfig,
+        current_version: str,
+        force: bool,
+    ) -> ResolveResult:
+        try:
+            candidate: str = self._get_candidate_version(name)
+            installed: str = self._get_installed_version(name)
+            return ResolveResult(
+                name=name,
+                current_version=installed,
+                latest_version=candidate,
+                needs_update=force or installed != candidate,
+                extra={},
+            )
+        except PackageError as e:
+            return ResolveResult(
+                name=name,
+                current_version=current_version,
+                latest_version="",
+                needs_update=False,
+                extra={},
+                error=str(e),
+            )
+
+    def install(  # pylint: disable=too-many-arguments,too-many-positional-arguments,unused-argument
+        self,
+        name: str,
+        pkg_config: PkgConfig,
+        resolved: ResolveResult,
+        task: PackageTask,
+        log_ctx: LogContext,
+    ) -> LockEntry:
+        task.status = "building"
+        cmd: str = f"sudo apt-get install -y {name}"
+
+        with log_ctx.lock:
+            log_ctx.file.write(f"=== {name} (apt) ===\n")
+            log_ctx.file.write(f"$ {cmd}\n")
+
+        with subprocess.Popen(
+            cmd,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        ) as proc:
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                raw: str = line.rstrip("\n")
+                task.detail = raw
+                with log_ctx.lock:
+                    log_ctx.file.write(line)
+            returncode: int = proc.wait()
+
+        with log_ctx.lock:
+            log_ctx.file.write(f"exit {returncode}\n\n")
+            log_ctx.file.flush()
+
+        if returncode != 0:
+            raise RuntimeError(f"apt-get install failed (exit {returncode}): {name}")
+
+        return LockEntry(
+            version=resolved.latest_version,
+            installed_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+    def pre_install(self) -> None:
+        """Cache sudo credentials before the live dashboard starts."""
+        subprocess.run(["sudo", "-v"], check=False)
+
+    @staticmethod
+    def _get_installed_version(name: str) -> str:
+        result: subprocess.CompletedProcess[str] = subprocess.run(
+            ["dpkg-query", "-W", "-f=${Version}", name],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return "none"
+        return result.stdout.strip()
+
+    @staticmethod
+    def _get_candidate_version(name: str) -> str:
+        result: subprocess.CompletedProcess[str] = subprocess.run(
+            ["apt-cache", "policy", name],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise PackageError(f"apt-cache policy failed for {name}")
+        for line in result.stdout.splitlines():
+            stripped: str = line.strip()
+            if stripped.startswith("Candidate:"):
+                candidate: str = stripped.split(":", 1)[1].strip()
+                if candidate == "(none)":
+                    raise PackageError(f"no candidate version for {name}")
+                return candidate
+        raise PackageError(f"could not parse apt-cache policy output for {name}")
+
+
 def _run_build_cmds_captured(
     cmds: list[str],
     variables: dict[str, str],
@@ -720,9 +856,8 @@ def _install_phase(
         refresh_per_second=10,
         console=CONSOLE,
     ) as live:
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=max(1, len(jobs))
-        ) as pool:
+        workers: int = max(1, len(jobs)) if getattr(handler, "parallel", True) else 1
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
             futures: list[concurrent.futures.Future[None]] = [
                 pool.submit(_install_worker, handler, job, ictx) for job in jobs
             ]
@@ -748,9 +883,11 @@ def _run_parallel_update(
     req: UpdateRequest,
 ) -> None:
     """Orchestrate three-phase parallel update for one source."""
-    packages: dict[str, PkgConfig] = source_config.get("packages", {})
-    if not isinstance(packages, dict):
-        return
+    raw_packages: dict[str, PkgConfig] | list[str] = source_config.get("packages", {})
+    if isinstance(raw_packages, list):
+        packages: dict[str, PkgConfig] = {name: {} for name in raw_packages}
+    else:
+        packages = raw_packages
 
     if req.filter_packages is not None:
         targets: list[str] = [p for p in req.filter_packages if p in packages]
@@ -759,6 +896,8 @@ def _run_parallel_update(
 
     if not targets:
         return
+
+    print(f"{BOLD}{YELLOW}:: {source_name}{RESET}")
 
     def get_pkg_requires(name: str) -> list[str]:
         """Extract same-source deps for topo-sort expansion."""
@@ -801,6 +940,8 @@ def _run_parallel_update(
         lock_mutex=threading.Lock(),
         log_ctx=LogContext(file=req.log, lock=threading.Lock()),
     )
+    if hasattr(handler, "pre_install"):
+        handler.pre_install()
     _install_phase(handler, packages, to_update, ictx)
 
 
@@ -810,12 +951,15 @@ def _get_source_handler(
     """Create the appropriate SourceHandler for a given source name."""
     if source_name == "github":
         return GithubSourceHandler(source_config)
+    if source_name == "apt":
+        return AptSourceHandler()
     return None
 
 
 def cmd_update(args: argparse.Namespace, config: PkgConfig) -> None:
     lock: LockData = load_pkg_lock()
     sources: dict[str, SourceConfig] = get_sources(config)
+    _infer_source_requires(sources)
     filter_packages: list[str] | None = args.packages if args.packages else None
     ordered_sources: list[str] = sort_sources(sources)
 
@@ -837,7 +981,6 @@ def cmd_update(args: argparse.Namespace, config: PkgConfig) -> None:
                 )
                 continue
 
-            print(f"{BOLD}{YELLOW}:: {source_name}{RESET}")
             _run_parallel_update(
                 source_name,
                 handler,
@@ -895,9 +1038,7 @@ def _print_status_results(results: list[ResolveResult]) -> None:
                 f" {YELLOW}->{RESET} {r.latest_version}"
             )
         else:
-            print(
-                f"{GREEN}[OK]{RESET} {r.name}: {GREEN}{r.current_version}{RESET}"
-            )
+            print(f"{GREEN}[OK]{RESET} {r.name}: {GREEN}{r.current_version}{RESET}")
 
 
 def cmd_status(config: PkgConfig) -> None:
@@ -913,11 +1054,14 @@ def cmd_status(config: PkgConfig) -> None:
         source_lock: dict[str, Any] = lock.get(source_name, {})
 
         handler: SourceHandler | None = _get_source_handler(source_name, source_config)
-        if handler and isinstance(packages, dict):
+        if handler:
+            resolved_pkgs: dict[str, PkgConfig] = (
+                {n: {} for n in packages} if isinstance(packages, list) else packages
+            )
             results: list[ResolveResult] = _resolve_phase(
                 handler,
-                packages,
-                list(packages.keys()),
+                resolved_pkgs,
+                list(resolved_pkgs.keys()),
                 source_lock,
                 force=False,
             )
