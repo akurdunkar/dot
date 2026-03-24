@@ -25,9 +25,13 @@ DEFAULT_SCRIPT = "handle_monitor_hotplug"
 
 def _run_script(script: str, kind: str, detail: str) -> None:
     log.info("[%s] %s", kind, detail)
-    result = subprocess.run([script], check=False)
-    if result.returncode != 0:
-        log.warning("'%s' exited with code %d", script, result.returncode)
+
+    def _run() -> None:
+        result = subprocess.run([script], check=False)
+        if result.returncode != 0:
+            log.warning("'%s' exited with code %d", script, result.returncode)
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def _listen_udev(script: str) -> None:
