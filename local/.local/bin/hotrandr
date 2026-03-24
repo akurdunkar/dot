@@ -65,6 +65,35 @@ def _listen_resume(script: str) -> None:
             _run_script(script, "resume", "system woke from sleep")
 
 
+def _listen_session(script: str) -> None:
+    """Re-run script on session unlock or new login session via logind D-Bus."""
+    try:
+        proc = subprocess.Popen(
+            [
+                "dbus-monitor",
+                "--system",
+                "type='signal',"
+                "interface='org.freedesktop.login1.Session',"
+                "member='Unlock'",
+                "type='signal',"
+                "interface='org.freedesktop.login1.Manager',"
+                "member='SessionNew'",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except FileNotFoundError:
+        log.warning("dbus-monitor not found, session events will not be detected")
+        return
+
+    for line in proc.stdout:
+        if "member=Unlock" in line:
+            _run_script(script, "session/unlock", "session unlocked")
+        elif "member=SessionNew" in line:
+            _run_script(script, "session/new", "new login session created")
+
+
 def _find_lid_switch() -> evdev.InputDevice | None:
     for path in evdev.list_devices():
         device = evdev.InputDevice(path)
@@ -103,9 +132,10 @@ def main() -> None:
     _run_script(args.script, "startup", "initial run")
 
     log.info(
-        "Listening for display/lid/resume events (running '%s' on change)…", args.script
+        "Listening for display/lid/resume/session events (running '%s' on change)…",
+        args.script,
     )
-    for target in (_listen_lid, _listen_resume):
+    for target in (_listen_lid, _listen_resume, _listen_session):
         threading.Thread(target=target, args=(args.script,), daemon=True).start()
     _listen_udev(args.script)
 
