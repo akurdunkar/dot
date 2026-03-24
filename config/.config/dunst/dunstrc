@@ -1,6 +1,7 @@
 [global]
 monitor = 0
 follow = keyboard
+timeout = 5
 
 [global]
 frame_color = "#262c36"
