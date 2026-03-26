@@ -409,6 +409,17 @@ def find_asset(assets: Iterable[ReleaseAsset], artifact: str) -> ReleaseAsset | 
     return next((a for a in assets if a.name == artifact), None)
 
 
+def _disambiguate_tarball_url(url: str) -> str:
+    """Rewrite a GitHub tarball URL to use refs/tags/ so it won't 300
+    when a branch shares the same name as the tag."""
+    prefix = "/tarball/"
+    idx = url.find(prefix)
+    if idx == -1 or "refs/" in url:
+        return url
+    tag = url[idx + len(prefix) :]
+    return url[: idx + len(prefix)] + f"refs/tags/{tag}"
+
+
 def resolve_artifact(
     latest: ReleaseLike,
     artifact: str | None,
@@ -417,7 +428,7 @@ def resolve_artifact(
 ) -> tuple[str, str]:
     """Resolve the download URL and artifact filename from a release."""
     if artifact is None:
-        return latest.tarball_url, f"{name}-{version}.tar.gz"
+        return _disambiguate_tarball_url(latest.tarball_url), f"{name}-{version}.tar.gz"
 
     resolved: str = artifact.format(version=version)
     asset: ReleaseAsset | None = find_asset(latest.get_assets(), resolved)
