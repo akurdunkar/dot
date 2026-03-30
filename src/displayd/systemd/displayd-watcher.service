@@ -1,0 +1,15 @@
+[Unit]
+Description=displayd monitor topology watcher
+After=systemd-udevd.service dbus.service
+Wants=dbus.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/displayd-watcher
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=displayd
+RuntimeDirectoryMode=0755
+
+[Install]
+WantedBy=multi-user.target

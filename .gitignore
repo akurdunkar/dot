@@ -2,3 +2,5 @@ gomp
 *.o
 __pycache__
 pkg.lock
+.venv
+*.egg-info
