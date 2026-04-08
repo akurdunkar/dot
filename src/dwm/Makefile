@@ -47,7 +47,7 @@ ${BUILD}/dwm: ${OBJ}
 	${CC} -o $@ ${OBJ} ${LDFLAGS}
 
 clean:
-	rm -rf ${BUILD} dwm-${VERSION}.tar.gz
+	rm -rf ${BUILD}
 
 install: all
 	install -Dm755 ${BUILD}/dwm ${DESTDIR}${PREFIX}/bin/dwm
