@@ -18,7 +18,7 @@ static const int DFW                       =   800;
 static const int DFH                       =   600;
 static const int DFX                       =   550;
 static const int DFY                       =   250;
-static const char *fonts[]                 =   { "Ubuntu Mono Nerd Font:size=12:style=Normal" };
+static const char *fonts[]                 =   { "Ubuntu Mono Nerd Font Propo:size=12:style=Normal" };
 static const char col_statusbar_fg[]       =   "#ffffff";
 static const char col_statusbar_bg[]       =   "#000000";
 static const char col_primary_fg[]         =   "#ffffff";
