@@ -7,6 +7,8 @@ Reads /proc/uptime and formats as e.g. "3d 2h 30m 40s".
 import argparse
 
 DEFAULT_ICON = ""  # Nerd Font hourglass-clock
+VIOLET_COLOR = "#ee82ee"
+TEXT_COLOR = "#01feac"
 
 
 def format_uptime(seconds: int) -> str:
@@ -33,7 +35,7 @@ def main() -> None:
     with open("/proc/uptime") as f:
         seconds = int(float(f.read().split()[0]))
 
-    print(f"{args.icon} {format_uptime(seconds)}", end="")
+    print(f"^c{VIOLET_COLOR}^{args.icon} ^c{TEXT_COLOR}^{format_uptime(seconds)}^d^", end="")
 
 
 if __name__ == "__main__":

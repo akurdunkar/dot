@@ -6,13 +6,13 @@ Date/time for status bars (dwm/slstatus etc.).
 import os
 from datetime import datetime
 
-DATE_ICON = " "  # Clock icon (Nerd Font:  )
+DATE_ICON = ""  # Clock icon (Nerd Font:  )
 
 
 def main() -> None:
     blue = os.environ.get("BLUE_COLOR", "")
     date_color = os.environ.get("RED_COLOR", "")
-    time_color = os.environ.get("GREEN_COLOR", "")
+    time_color = "#99e31c"
 
     now = datetime.now()
     # Single strftime then split for the two color spans
