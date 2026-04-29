@@ -6,7 +6,7 @@ Reads /proc/uptime and formats as e.g. "3d 2h 30m 40s".
 
 import argparse
 
-DEFAULT_ICON = "󰔚"  # Nerd Font hourglass-clock
+DEFAULT_ICON = ""  # Nerd Font hourglass-clock
 
 
 def format_uptime(seconds: int) -> str:
