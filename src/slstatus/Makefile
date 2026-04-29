@@ -1,12 +1,10 @@
 # See LICENSE file for copyright and license details
 # slstatus - suckless status monitor
-.POSIX:
 
 VERSION = 0
 
 # paths
 PREFIX = /usr/local
-MANPREFIX = $(PREFIX)/share/man
 
 X11INC = /usr/X11R6/include
 X11LIB = /usr/X11R6/lib
@@ -20,34 +18,36 @@ LDLIBS   = -lX11
 # compiler
 CC = cc
 
-REQ = util
+# --------------------------------------------------------------------------
 
-all: slstatus
+BUILD = build
+REQ   = util
+SRC   = slstatus.c $(REQ:=.c)
+OBJ   = $(addprefix $(BUILD)/,$(SRC:.c=.o))
 
-slstatus.o: slstatus.c slstatus.h arg.h config.h $(REQ:=.h)
+all: $(BUILD)/slstatus
 
-.c.o:
+$(BUILD):
+	mkdir -p $(BUILD)
+
+$(BUILD)/slstatus.o: slstatus.h arg.h config.h $(REQ:=.h)
+$(BUILD)/util.o: util.h
+
+$(BUILD)/%.o: %.c | $(BUILD)
 	$(CC) -o $@ -c $(CPPFLAGS) $(CFLAGS) $<
 
-slstatus: slstatus.o $(REQ:=.o)
-	$(CC) -o $@ $(LDFLAGS) $(REQ:=.o) slstatus.o $(LDLIBS)
+$(BUILD)/slstatus: $(OBJ)
+	$(CC) -o $@ $(LDFLAGS) $(OBJ) $(LDLIBS)
 
 clean:
-	rm -f slstatus slstatus.o $(REQ:=.o)
-
-dist:
-	rm -rf "slstatus-$(VERSION)"
-	mkdir -p "slstatus-$(VERSION)"
-	cp -R LICENSE Makefile README config.h \
-	      arg.h slstatus.c $(REQ:=.c) $(REQ:=.h) \
-	      "slstatus-$(VERSION)"
-	tar -cf - "slstatus-$(VERSION)" | gzip -c > "slstatus-$(VERSION).tar.gz"
-	rm -rf "slstatus-$(VERSION)"
+	rm -rf $(BUILD)
 
 install: all
 	mkdir -p "$(DESTDIR)$(PREFIX)/bin"
-	cp -f slstatus "$(DESTDIR)$(PREFIX)/bin"
+	cp -f $(BUILD)/slstatus "$(DESTDIR)$(PREFIX)/bin"
 	chmod 755 "$(DESTDIR)$(PREFIX)/bin/slstatus"
 
 uninstall:
 	rm -f "$(DESTDIR)$(PREFIX)/bin/slstatus"
+
+.PHONY: all clean install uninstall
