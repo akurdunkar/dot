@@ -1,0 +1,40 @@
+#!/usr/bin/env python3
+"""
+Uptime for status bars (dwm/slstatus etc.).
+Reads /proc/uptime and formats as e.g. "3d 2h 30m 40s".
+"""
+
+import argparse
+
+DEFAULT_ICON = "󰔚"  # Nerd Font hourglass-clock
+
+
+def format_uptime(seconds: int) -> str:
+    days, rem = divmod(seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, secs = divmod(rem, 60)
+
+    parts: list[str] = []
+    if days:
+        parts.append(f"{days}d")
+    if hours or parts:
+        parts.append(f"{hours}h")
+    if minutes or parts:
+        parts.append(f"{minutes}m")
+    parts.append(f"{secs}s")
+    return " ".join(parts)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Print system uptime.")
+    parser.add_argument("-i", "--icon", default=DEFAULT_ICON, help="icon prefix")
+    args = parser.parse_args()
+
+    with open("/proc/uptime") as f:
+        seconds = int(float(f.read().split()[0]))
+
+    print(f"{args.icon} {format_uptime(seconds)}", end="")
+
+
+if __name__ == "__main__":
+    main()
