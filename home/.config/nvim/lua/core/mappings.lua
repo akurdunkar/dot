@@ -1,23 +1,22 @@
-vim.g["mapleader"] = " " -- set leader key
-local seeded = false
-
 local function nnoremap(lhs, rhs)
-    vim.api.nvim_set_keymap("n", lhs, rhs, { noremap = true, silent = true })
+    vim.keymap.set("n", lhs, rhs, { noremap = true, silent = true })
 end
 
 local function nmap(lhs, rhs)
-    vim.api.nvim_set_keymap("n", lhs, rhs, {})
+    vim.keymap.set("n", lhs, rhs, { remap = true })
 end
 
 local function vnoremap(lhs, rhs)
-    vim.api.nvim_set_keymap("v", lhs, rhs, { noremap = true })
+    vim.keymap.set("v", lhs, rhs, { noremap = true })
 end
 
 local function imap(lhs, rhs)
-    vim.api.nvim_set_keymap("i", lhs, rhs, {})
+    vim.keymap.set("i", lhs, rhs, { remap = true })
 end
 
-function random_color()
+local seeded = false
+
+local function random_color()
     if not seeded then
         math.randomseed(os.time())
         for _ = 0, 3, 1
@@ -37,7 +36,7 @@ end
 nnoremap("<TAB>", ":bnext<CR>")
 nnoremap("<S-TAB>", ":bprevious<CR>")
 nnoremap("Y", "y$")
-nnoremap("mm", ":lua random_color() <CR>")
+nnoremap("mm", random_color)
 
 -- Split Navigation Mappings
 
@@ -66,11 +65,6 @@ vnoremap(">", ">gv")
 
 imap("<C-BS>", "<C-w>")
 imap("<C-h>", "<C-w>")
-
-vim.cmd("autocmd BufRead,BufNewFile *.txt nmap <CR> :wq <CR>")
-vim.cmd("autocmd BufWritePre * :%s/\\s\\+$//e")
-vim.cmd("autocmd BufRead,BufNewFile .zshrc set filetype=bash")
-vim.cmd("autocmd BufRead,BufNewFile *.html set noexpandtab")
 
 -- Clipboard
 vim.cmd('noremap <Leader>y "+y')

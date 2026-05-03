@@ -23,3 +23,35 @@ vim.api.nvim_create_autocmd("TermOpen", {
         vim.cmd("setlocal nonu nornu")
     end
 })
+
+vim.api.nvim_create_autocmd({ "BufRead", "BufNewFile" }, {
+    group = format_group,
+    pattern = "*.txt",
+    callback = function()
+        vim.cmd("nmap <CR> :wq <CR>")
+    end
+})
+
+vim.api.nvim_create_autocmd("BufWritePre", {
+    group = format_group,
+    pattern = "*",
+    callback = function()
+        vim.cmd([[%s/\s\+$//e]])
+    end
+})
+
+vim.api.nvim_create_autocmd({ "BufRead", "BufNewFile" }, {
+    group = format_group,
+    pattern = ".zshrc",
+    callback = function()
+        vim.cmd("set filetype=bash")
+    end
+})
+
+vim.api.nvim_create_autocmd({ "BufRead", "BufNewFile" }, {
+    group = format_group,
+    pattern = "*.html",
+    callback = function()
+        vim.cmd("set noexpandtab")
+    end
+})

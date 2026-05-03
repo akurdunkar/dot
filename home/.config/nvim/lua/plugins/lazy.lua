@@ -32,7 +32,7 @@ require("lazy").setup({
     { 'junegunn/fzf.vim' },
 
     -- Color scheme
-    'aditya-K2/scruber.vim',
+    'RRethy/nvim-base16',
 
     {
         'lewis6991/gitsigns.nvim',

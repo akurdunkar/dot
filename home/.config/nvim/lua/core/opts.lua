@@ -5,12 +5,13 @@ vim.g["color_coded_enabled "]          = 1
 vim.g["go_def_mapping_enabled"]        = false
 vim.g["fzf_preview_window"]            = {}
 vim.g["fzf_layout"]                    = { down = '25%' }
+vim.g["mapleader"]                     = " "
 
 -- Colors
 
 vim.cmd [[
     syntax enable
-    color scruber
+    color base16-bright
     syntax on
 ]]
 
