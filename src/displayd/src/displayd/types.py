@@ -119,7 +119,9 @@ class Topology:
         )
         return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
-    def output_by_identity(self, identity: MonitorIdentity) -> Optional[ConnectedOutput]:
+    def output_by_identity(
+        self, identity: MonitorIdentity
+    ) -> Optional[ConnectedOutput]:
         for o in self.outputs:
             if o.identity.matches(identity):
                 return o

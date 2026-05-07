@@ -129,7 +129,10 @@ def main() -> None:
         help="Manual-change cooldown seconds (default: %(default)s)",
     )
     ap.add_argument(
-        "--retries", type=int, default=5, help="Max apply retries (default: %(default)s)"
+        "--retries",
+        type=int,
+        default=5,
+        help="Max apply retries (default: %(default)s)",
     )
     ap.add_argument("--verbose", "-v", action="store_true")
     ap.add_argument("--json-log", action="store_true")

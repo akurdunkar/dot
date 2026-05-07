@@ -26,11 +26,7 @@ _MATCH_RULES = [
         "interface='org.freedesktop.login1.Manager',"
         "member='PrepareForSleep'"
     ),
-    (
-        "type='signal',"
-        "interface='org.freedesktop.login1.Session',"
-        "member='Unlock'"
-    ),
+    ("type='signal'," "interface='org.freedesktop.login1.Session'," "member='Unlock'"),
     (
         "type='signal',"
         "interface='org.freedesktop.login1.Manager',"
@@ -87,9 +83,7 @@ async def _watch_once(queue: asyncio.Queue[DisplayEvent]) -> None:
                     sid = str(msg.body[0]) if msg.body else "?"
                     log.info("New logind session: %s", sid)
                     asyncio.ensure_future(
-                        queue.put(
-                            DisplayEvent(kind=EventKind.SESSION_NEW, detail=sid)
-                        )
+                        queue.put(DisplayEvent(kind=EventKind.SESSION_NEW, detail=sid))
                     )
 
             elif iface == "org.freedesktop.login1.Session":

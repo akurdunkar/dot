@@ -20,8 +20,10 @@ async def _notify(summary: str, body: str, urgency: str = "normal") -> None:
     try:
         proc = await asyncio.create_subprocess_exec(
             "notify-send",
-            "-u", urgency,
-            "-a", "displayd",
+            "-u",
+            urgency,
+            "-a",
+            "displayd",
             summary,
             body,
             stdout=asyncio.subprocess.DEVNULL,

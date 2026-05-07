@@ -30,11 +30,11 @@ _OUTPUT_HEADER = re.compile(
     r"^(\S+)\s+(connected|disconnected)\s*"
     r"(?:(primary)\s+)?"
     r"(?:(\d+)x(\d+)\+(\d+)\+(\d+)\s*)?"
+    r"(?:\(0x[0-9a-fA-F]+\)\s*)?"
+    r"(?:(left|right|inverted|normal)\s+)?"
 )
 # Verbose: "  3440x1440 (0x6a6) 319.750MHz +HSync -VSync *current +preferred"
-_MODE_LINE_VERBOSE = re.compile(
-    r"^\s+(\d+x\d+)\s+\(0x[0-9a-fA-F]+\)\s+[\d.]+MHz\b(.*)"
-)
+_MODE_LINE_VERBOSE = re.compile(r"^\s+(\d+x\d+)\s+\(0x[0-9a-fA-F]+\)\s+[\d.]+MHz\b(.*)")
 # Non-verbose: "  3440x1440     59.97*+  29.99"
 _MODE_LINE_SIMPLE = re.compile(r"^\s+(\d+x\d+)\s+([\d.]+)(\*?)(\+?)")
 _EDID_TAG = re.compile(r"^\s+EDID:\s*$")
@@ -59,13 +59,14 @@ def _parse_xrandr_verbose(
     has_geometry = False
     cur_mode: Optional[str] = None
     cur_pos = (0, 0)
+    cur_rotation = "normal"
     modes: list[str] = []
     edid_hex = ""
     in_edid = False
 
     def _flush() -> None:
         nonlocal name, connected, primary, has_geometry, cur_mode, cur_pos
-        nonlocal modes, edid_hex, in_edid
+        nonlocal cur_rotation, modes, edid_hex, in_edid
         if name and connected:
             identity = UNKNOWN_IDENTITY
             edid_raw = b""
@@ -82,6 +83,7 @@ def _parse_xrandr_verbose(
                     modes=tuple(modes),
                     current_mode=cur_mode,
                     current_position=cur_pos,
+                    current_rotation=cur_rotation,
                     is_primary=primary,
                     edid_raw=edid_raw,
                 )
@@ -94,6 +96,7 @@ def _parse_xrandr_verbose(
         has_geometry = False
         cur_mode = None
         cur_pos = (0, 0)
+        cur_rotation = "normal"
         modes = []
         edid_hex = ""
         in_edid = False
@@ -108,6 +111,8 @@ def _parse_xrandr_verbose(
             if hdr.group(4) and hdr.group(5):
                 has_geometry = True
                 cur_pos = (int(hdr.group(6) or 0), int(hdr.group(7) or 0))
+            if hdr.group(8):
+                cur_rotation = hdr.group(8)
             continue
 
         if _EDID_TAG.match(line):

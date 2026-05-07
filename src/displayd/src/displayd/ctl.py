@@ -5,13 +5,21 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import os
 import sys
 from pathlib import Path
 
+from .agent.applier import DisplayApplier
 from .backends import detect_backend
 from .log import setup_logging
-from .policy import load_profiles, match_profile, plan_reconciliation, save_profile, snapshot_to_profile
+from .policy import (
+    load_profiles,
+    match_profile,
+    plan_reconciliation,
+    save_profile,
+    snapshot_to_profile,
+)
 
 DEFAULT_PROFILE_DIR = Path(
     os.environ.get(
@@ -73,7 +81,9 @@ def _cmd_list(args: argparse.Namespace) -> None:
             mode = o.mode or "(any)"
             pri = " [primary]" if o.primary else ""
             state = mode if o.enabled else "(disabled)"
-            print(f"      {o.identity.stable_id}  {state}  {o.position[0]}x{o.position[1]}{pri}")
+            print(
+                f"      {o.identity.stable_id}  {state}  {o.position[0]}x{o.position[1]}{pri}"
+            )
         print()
 
 
@@ -115,6 +125,20 @@ async def _cmd_status(args: argparse.Namespace) -> None:
                 print(f"  {connector}: {', '.join(parts)}")
 
 
+async def _cmd_sync(args: argparse.Namespace) -> None:
+    backend = detect_backend()
+    profiles = load_profiles(args.profile_dir)
+    if not profiles:
+        sys.exit(f"No profiles in {args.profile_dir}")
+    applier = DisplayApplier(
+        backend=backend,
+        profiles=profiles,
+        cooldown_seconds=0,
+    )
+    ok = await applier.reconcile(force=True)
+    sys.exit(0 if ok else 1)
+
+
 def _cmd_delete(args: argparse.Namespace) -> None:
     profiles = load_profiles(args.profile_dir)
     match = [p for p in profiles if p.name == args.name]
@@ -145,11 +169,14 @@ def main() -> None:
 
     sub.add_parser("status", help="Show matched profile and sync state")
     sub.add_parser("show", help="Show current display topology")
+    sub.add_parser("sync", help="Apply the matched profile to the current topology")
 
     sp_save = sub.add_parser("save", help="Save current layout as a profile")
     sp_save.add_argument("name", help="Profile name")
     sp_save.add_argument(
-        "--priority", type=int, default=0,
+        "--priority",
+        type=int,
+        default=0,
         help="Profile priority (higher wins, default: 0)",
     )
 
@@ -161,7 +188,9 @@ def main() -> None:
     args = ap.parse_args()
 
     if args.verbose:
-        setup_logging("displayd", level=10)
+        setup_logging("displayd", level=logging.DEBUG)
+    elif args.command == "sync":
+        setup_logging("displayd", level=logging.INFO)
 
     if args.command == "status":
         asyncio.run(_cmd_status(args))
@@ -173,6 +202,8 @@ def main() -> None:
         _cmd_list(args)
     elif args.command == "delete":
         _cmd_delete(args)
+    elif args.command == "sync":
+        asyncio.run(_cmd_sync(args))
 
 
 if __name__ == "__main__":

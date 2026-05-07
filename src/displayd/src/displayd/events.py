@@ -51,11 +51,7 @@ class EventCoalescer:
             if self._timer is not None:
                 self._timer.cancel()
 
-            delay = (
-                self._hw_settle
-                if event.kind in HARDWARE_EVENTS
-                else self._debounce
-            )
+            delay = self._hw_settle if event.kind in HARDWARE_EVENTS else self._debounce
             loop = asyncio.get_running_loop()
             self._timer = loop.call_later(delay, self._schedule_flush)
 

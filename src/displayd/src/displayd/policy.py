@@ -51,9 +51,7 @@ def save_profile(profile: Profile, profile_dir: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def match_profile(
-    topology: Topology, profiles: list[Profile]
-) -> Optional[Profile]:
+def match_profile(topology: Topology, profiles: list[Profile]) -> Optional[Profile]:
     topo_hash = topology.identity_hash
     candidates = [p for p in profiles if p.topology_hash == topo_hash]
     if not candidates:
