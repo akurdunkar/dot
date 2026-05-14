@@ -85,7 +85,7 @@ def main() -> None:
 
     # Status bar output (single print)
     icon_part = f"{BATTERY_ICON}{' ' + CHARGING_ICON + ' ' if charging else ''}"
-    print(f" ^c{yellow}^{icon_part} {capacity}%", end="")
+    print(f"^c{yellow}^{icon_part} {capacity}%", end="")
 
 
 if __name__ == "__main__":

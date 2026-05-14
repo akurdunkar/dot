@@ -21,7 +21,7 @@ def main() -> None:
     date_str += ", "
 
     print(
-        f"^c{blue}^ {DATE_ICON} ^c{date_color}^{date_str}^c{time_color}^{time_str}",
+        f"^c{blue}^{DATE_ICON} ^c{date_color}^{date_str}^c{time_color}^{time_str}",
         end="",
     )
 
