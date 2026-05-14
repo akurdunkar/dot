@@ -4,3 +4,4 @@ pkg.lock
 .venv
 *.egg-info
 build
+nohup.out
