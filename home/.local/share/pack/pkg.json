@@ -163,6 +163,14 @@
                     "make",
                     "make install"
                 ]
+            },
+            "obsidian": {
+                "repo": "obsidianmd/obsidian-releases",
+                "artifact": "Obsidian-{version}.AppImage",
+                "cmds": [
+                    "cp {artifact} {install_dir}/obsidian",
+                    "chmod +x {install_dir}/obsidian"
+                ]
             }
         }
     }
