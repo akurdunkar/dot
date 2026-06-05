@@ -24,6 +24,15 @@ vim.api.nvim_create_autocmd("TermOpen", {
     end
 })
 
+vim.api.nvim_create_autocmd("FileType", {
+    group = format_group,
+    pattern = "markdown",
+    callback = function()
+        vim.opt_local.textwidth = 80
+        vim.opt_local.formatoptions:append("t")
+    end
+})
+
 vim.api.nvim_create_autocmd({ "BufRead", "BufNewFile" }, {
     group = format_group,
     pattern = "*.txt",
