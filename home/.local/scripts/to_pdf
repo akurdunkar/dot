@@ -1,0 +1,600 @@
+#!/usr/bin/env python3
+"""to_pdf -- convert documents to a GitHub-styled, print-ready PDF.
+
+Markdown is the only format supported today, but the design is deliberately
+converter-based so new input formats (docx, rst, ...) can be added by writing a
+small ``Converter`` subclass and registering it in ``build_registry`` -- the CLI
+and the HTML->PDF rendering stage stay untouched.
+
+Pipeline
+--------
+    source file --(Converter)--> HTML body fragment --(renderer)--> PDF
+
+Every ``Converter`` turns a source file into a ``ConvertedDocument`` containing
+an HTML body fragment plus the CSS/body class needed to render that format.  A
+single, format-agnostic renderer wraps that fragment in an HTML document and
+rasterises it to PDF with WeasyPrint.
+
+Runtime dependencies (pure Python, pip-installable -- no browser/binary)::
+
+    pip install markdown pymdown-extensions pygments weasyprint
+
+WeasyPrint additionally needs the system Pango/Cairo libraries at runtime; on
+Debian/Ubuntu::
+
+    sudo apt install libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0
+
+Development -- formatting and static analysis (run from this directory)::
+
+    black to_pdf
+    mypy --strict to_pdf
+    pylint to_pdf
+
+(If a tool refuses the extension-less filename, point it at a ``.py`` symlink:
+``ln -sf to_pdf /tmp/to_pdf.py`` and lint that.)
+"""
+
+from __future__ import annotations
+
+import abc
+import argparse
+import sys
+from dataclasses import dataclass
+from html import escape
+from importlib import import_module
+from pathlib import Path
+from typing import ClassVar, Mapping, Protocol, Sequence, cast
+
+__version__ = "1.0.0"
+
+DEFAULT_SYNTAX_THEME = "default"
+
+
+# --------------------------------------------------------------------------- #
+# Errors
+# --------------------------------------------------------------------------- #
+class ToPdfError(Exception):
+    """Base class for expected, user-facing failures (reported without a trace)."""
+
+
+class DependencyError(ToPdfError):
+    """A required third-party package is not importable."""
+
+    def __init__(self, package: str, *, install: str) -> None:
+        super().__init__(f"missing dependency {package!r}; install it with: {install}")
+
+
+class UnsupportedFormatError(ToPdfError):
+    """No registered converter handles the given file."""
+
+
+class SourceError(ToPdfError):
+    """The source file could not be read or decoded."""
+
+
+class OptionError(ToPdfError):
+    """A command-line option value is invalid."""
+
+
+class RenderError(ToPdfError):
+    """The PDF could not be rendered or written."""
+
+
+# --------------------------------------------------------------------------- #
+# Converter abstraction
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class ConvertedDocument:  # pylint: disable=too-few-public-methods
+    """HTML body plus presentation details produced by a source converter."""
+
+    body_html: str
+    css: str = ""
+    body_class: str = "document-body"
+
+
+class MarkdownRenderer(Protocol):  # pylint: disable=too-few-public-methods
+    """Small typed boundary for Python-Markdown's renderer object."""
+
+    def convert(self, source: str) -> str:
+        """Return rendered HTML for Markdown source text."""
+
+
+class MarkdownFactory(Protocol):  # pylint: disable=too-few-public-methods
+    """Callable shape of ``markdown.Markdown`` used by this script."""
+
+    def __call__(
+        self,
+        *,
+        extensions: Sequence[str],
+        extension_configs: Mapping[str, Mapping[str, object]],
+        output_format: str,
+    ) -> MarkdownRenderer:
+        """Create a Markdown renderer."""
+
+
+def _load_markdown_factory() -> MarkdownFactory:
+    """Return ``markdown.Markdown`` without requiring third-party stubs."""
+    try:
+        markdown_module = import_module("markdown")
+    except ImportError as exc:
+        raise DependencyError(
+            "markdown", install="pip install markdown pymdown-extensions"
+        ) from exc
+    return cast(MarkdownFactory, getattr(markdown_module, "Markdown"))
+
+
+class CssFormatter(Protocol):  # pylint: disable=too-few-public-methods
+    """Subset of Pygments' HTML formatter used by this script."""
+
+    def get_style_defs(self, selector: str) -> str:
+        """Return CSS rules scoped to ``selector``."""
+
+
+class HtmlFormatterFactory(Protocol):  # pylint: disable=too-few-public-methods
+    """Callable shape of ``pygments.formatters.HtmlFormatter``."""
+
+    def __call__(self, **options: object) -> CssFormatter:
+        """Create a Pygments HTML formatter."""
+
+
+def _load_pygments() -> tuple[HtmlFormatterFactory, type[Exception]]:
+    """Return Pygments APIs without requiring third-party stubs."""
+    try:
+        formatters_module = import_module("pygments.formatters")
+        util_module = import_module("pygments.util")
+    except ImportError as exc:
+        raise DependencyError("pygments", install="pip install pygments") from exc
+
+    return (
+        cast(HtmlFormatterFactory, getattr(formatters_module, "HtmlFormatter")),
+        cast(type[Exception], getattr(util_module, "ClassNotFound")),
+    )
+
+
+class PdfWriter(Protocol):  # pylint: disable=too-few-public-methods
+    """Subset of WeasyPrint's HTML document used by this script."""
+
+    def write_pdf(self, target: str) -> object:
+        """Write the rendered PDF to ``target``."""
+
+
+class HtmlDocumentFactory(Protocol):  # pylint: disable=too-few-public-methods
+    """Callable shape of ``weasyprint.HTML``."""
+
+    def __call__(self, *, string: str, base_url: str) -> PdfWriter:
+        """Create a WeasyPrint HTML document."""
+
+
+def _load_weasy_html() -> HtmlDocumentFactory:
+    """Return ``weasyprint.HTML`` without requiring third-party stubs."""
+    try:
+        weasyprint_module = import_module("weasyprint")
+    except ImportError as exc:
+        raise DependencyError("weasyprint", install="pip install weasyprint") from exc
+    return cast(HtmlDocumentFactory, getattr(weasyprint_module, "HTML"))
+
+
+class Converter(abc.ABC):  # pylint: disable=too-few-public-methods
+    """Turns a source document into a render-ready HTML document fragment.
+
+    Subclasses declare the file extensions they handle and implement
+    :meth:`convert`.
+    """
+
+    #: Human-readable format name, shown by ``--list-formats``.
+    name: ClassVar[str] = ""
+    #: Lower-case file extensions (including the leading dot) handled by this converter.
+    extensions: ClassVar[tuple[str, ...]] = ()
+
+    @abc.abstractmethod
+    def convert(self, source: Path) -> ConvertedDocument:
+        """Read ``source`` and return converted HTML/CSS (no ``<html>`` wrapper)."""
+
+
+class MarkdownConverter(Converter):  # pylint: disable=too-few-public-methods
+    """Render GitHub-flavoured Markdown to HTML using Python-Markdown."""
+
+    name: ClassVar[str] = "GitHub-flavoured Markdown"
+    extensions: ClassVar[tuple[str, ...]] = (".md", ".markdown", ".mdown", ".mkd")
+
+    #: Extensions chosen to approximate GitHub's rendering.
+    _EXTENSIONS: ClassVar[tuple[str, ...]] = (
+        "extra",  # tables, fenced_code, footnotes, attr_list, def_list, md_in_html
+        "sane_lists",
+        "toc",  # stable id anchors on headings
+        "codehilite",  # Pygments-based syntax highlighting
+        "pymdownx.tasklist",  # - [ ] / - [x] checkboxes
+        "pymdownx.tilde",  # ~~strikethrough~~
+        "pymdownx.magiclink",  # bare-URL autolinking
+    )
+
+    def __init__(self, *, syntax_theme: str = DEFAULT_SYNTAX_THEME) -> None:
+        self._syntax_theme = syntax_theme
+
+    def convert(self, source: Path) -> ConvertedDocument:
+        try:
+            text = source.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise SourceError(f"cannot read {source}: {exc}") from exc
+        except UnicodeDecodeError as exc:
+            raise SourceError(f"{source} is not valid UTF-8: {exc}") from exc
+
+        renderer_factory = _load_markdown_factory()
+        extension_configs: dict[str, dict[str, object]] = {
+            "codehilite": {"guess_lang": False, "css_class": "codehilite"},
+            "toc": {"permalink": False},
+        }
+        try:
+            renderer = renderer_factory(
+                extensions=self._EXTENSIONS,
+                extension_configs=extension_configs,
+                output_format="html",
+            )
+        except ImportError as exc:
+            raise DependencyError(
+                "pymdown-extensions", install="pip install pymdown-extensions"
+            ) from exc
+
+        return ConvertedDocument(
+            body_html=renderer.convert(text),
+            css=GITHUB_MARKDOWN_CSS + "\n" + self._syntax_css(),
+            body_class="markdown-body",
+        )
+
+    def _syntax_css(self) -> str:
+        html_formatter, class_not_found = _load_pygments()
+        try:
+            styles = html_formatter(style=self._syntax_theme).get_style_defs(
+                ".codehilite"
+            )
+        except class_not_found as exc:
+            raise OptionError(
+                f"unknown Pygments syntax theme {self._syntax_theme!r}"
+            ) from exc
+        return styles
+
+
+# --------------------------------------------------------------------------- #
+# Converter registry
+# --------------------------------------------------------------------------- #
+class ConverterRegistry:
+    """Maps file extensions to the converter that handles them."""
+
+    def __init__(self) -> None:
+        self._by_ext: dict[str, Converter] = {}
+        self._converters: list[Converter] = []
+
+    def register(self, converter: Converter) -> None:
+        """Register ``converter`` for each of its declared extensions."""
+        normalized_extensions = tuple(ext.lower() for ext in converter.extensions)
+        converter_name = converter.name or type(converter).__name__
+        if not normalized_extensions:
+            raise ValueError(f"{converter_name} has no extensions")
+
+        for ext in normalized_extensions:
+            if not ext.startswith("."):
+                raise ValueError(
+                    f"{converter_name} extension {ext!r} must start with '.'"
+                )
+            existing = self._by_ext.get(ext)
+            if existing is not None:
+                existing_name = existing.name or type(existing).__name__
+                raise ValueError(
+                    f"extension {ext!r} is already handled by {existing_name}"
+                )
+
+        self._converters.append(converter)
+        for ext in normalized_extensions:
+            self._by_ext[ext] = converter
+
+    def for_path(self, source: Path) -> Converter:
+        """Return the converter for ``source`` or raise :class:`UnsupportedFormatError`."""
+        try:
+            return self._by_ext[source.suffix.lower()]
+        except KeyError:
+            supported = ", ".join(self.extensions()) or "(none)"
+            raise UnsupportedFormatError(
+                f"no converter for {source.suffix or source.name!r}; "
+                f"supported extensions: {supported}"
+            ) from None
+
+    def converters(self) -> list[Converter]:
+        """Return all registered converters in registration order."""
+        return list(self._converters)
+
+    def extensions(self) -> list[str]:
+        """Return all handled extensions, sorted."""
+        return sorted(self._by_ext)
+
+
+def build_registry(*, syntax_theme: str = DEFAULT_SYNTAX_THEME) -> ConverterRegistry:
+    """Construct the registry of all available converters.
+
+    Adding support for a new format is a one-line change here plus a
+    :class:`Converter` subclass above -- nothing else needs to change.
+    """
+    registry = ConverterRegistry()
+    registry.register(MarkdownConverter(syntax_theme=syntax_theme))
+    return registry
+
+
+# --------------------------------------------------------------------------- #
+# GitHub-styled HTML document + PDF rendering
+# --------------------------------------------------------------------------- #
+# A faithful-but-compact adaptation of github-markdown-css (MIT, sindresorhus),
+# tuned for paged/print media: tables and code wrap instead of horizontally
+# scrolling, and page breaks are nudged away from headings and code blocks.
+GITHUB_MARKDOWN_CSS = """
+:root {
+  --fg: #1f2328;
+  --muted: #59636e;
+  --link: #0969da;
+  --border: #d1d9e0;
+  --code-bg: #f6f8fa;
+}
+
+* { box-sizing: border-box; }
+
+@page {
+  size: A4;
+  margin: 1.6cm 1.4cm;
+  @bottom-right {
+    content: counter(page) " / " counter(pages);
+    font-size: 9pt;
+    color: #59636e;
+  }
+}
+
+body { margin: 0; background: #ffffff; }
+
+.markdown-body {
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans",
+               Helvetica, Arial, sans-serif;
+  font-size: 11pt;
+  line-height: 1.5;
+  word-wrap: break-word;
+}
+.markdown-body > *:first-child { margin-top: 0 !important; }
+.markdown-body > *:last-child { margin-bottom: 0 !important; }
+
+.markdown-body h1, .markdown-body h2, .markdown-body h3,
+.markdown-body h4, .markdown-body h5, .markdown-body h6 {
+  margin-top: 24px;
+  margin-bottom: 16px;
+  font-weight: 600;
+  line-height: 1.25;
+  page-break-after: avoid;
+}
+.markdown-body h1 { font-size: 2em; padding-bottom: .3em; border-bottom: 1px solid var(--border); }
+.markdown-body h2 { font-size: 1.5em; padding-bottom: .3em; border-bottom: 1px solid var(--border); }
+.markdown-body h3 { font-size: 1.25em; }
+.markdown-body h4 { font-size: 1em; }
+.markdown-body h5 { font-size: .875em; }
+.markdown-body h6 { font-size: .85em; color: var(--muted); }
+
+.markdown-body p { margin-top: 0; margin-bottom: 16px; }
+.markdown-body a { color: var(--link); text-decoration: none; }
+.markdown-body a:hover { text-decoration: underline; }
+.markdown-body strong { font-weight: 600; }
+
+.markdown-body blockquote {
+  margin: 0 0 16px 0;
+  padding: 0 1em;
+  color: var(--muted);
+  border-left: .25em solid var(--border);
+  page-break-inside: avoid;
+}
+.markdown-body blockquote > :first-child { margin-top: 0; }
+.markdown-body blockquote > :last-child { margin-bottom: 0; }
+
+.markdown-body ul, .markdown-body ol { margin-top: 0; margin-bottom: 16px; padding-left: 2em; }
+.markdown-body li + li { margin-top: .25em; }
+.markdown-body li > p { margin-top: 16px; }
+
+.markdown-body code, .markdown-body kbd, .markdown-body pre, .markdown-body tt {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+               "Liberation Mono", monospace;
+}
+.markdown-body code {
+  padding: .2em .4em;
+  margin: 0;
+  font-size: 85%;
+  background-color: rgba(129, 139, 152, 0.12);
+  border-radius: 6px;
+}
+.markdown-body pre, .markdown-body .codehilite {
+  margin-top: 0;
+  margin-bottom: 16px;
+  padding: 16px;
+  overflow: auto;
+  font-size: 85%;
+  line-height: 1.45;
+  background-color: var(--code-bg);
+  border-radius: 6px;
+  white-space: pre-wrap;          /* wrap long lines in the PDF rather than clip them */
+  overflow-wrap: break-word;
+  page-break-inside: avoid;
+}
+.markdown-body .codehilite pre { margin: 0; padding: 0; background: transparent; }
+.markdown-body pre code {
+  display: inline;
+  max-width: none;
+  padding: 0;
+  margin: 0;
+  font-size: 100%;
+  background: transparent;
+  border: 0;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.markdown-body table {
+  display: table;
+  width: 100%;
+  margin-top: 0;
+  margin-bottom: 16px;
+  border-collapse: collapse;
+  border-spacing: 0;
+  page-break-inside: avoid;
+}
+.markdown-body table th, .markdown-body table td {
+  padding: 6px 13px;
+  border: 1px solid var(--border);
+}
+.markdown-body table th { font-weight: 600; }
+.markdown-body table tr { background-color: #ffffff; border-top: 1px solid var(--border); }
+.markdown-body table tr:nth-child(2n) { background-color: var(--code-bg); }
+
+.markdown-body img { max-width: 100%; background-color: #ffffff; page-break-inside: avoid; }
+
+.markdown-body hr {
+  height: .25em;
+  padding: 0;
+  margin: 24px 0;
+  background-color: var(--border);
+  border: 0;
+}
+
+.markdown-body .task-list-item { list-style-type: none; }
+.markdown-body .task-list-item input { margin: 0 .35em .25em -1.4em; vertical-align: middle; }
+
+.markdown-body .footnote, .markdown-body .footnotes { font-size: 85%; color: var(--muted); }
+.markdown-body sup { line-height: 0; }
+"""
+
+
+def html_document(document: ConvertedDocument, *, title: str) -> str:
+    """Wrap an HTML body fragment in a complete, styled HTML5 document."""
+    return (
+        "<!DOCTYPE html>\n"
+        '<html lang="en">\n'
+        "<head>\n"
+        '<meta charset="utf-8">\n'
+        f"<title>{escape(title)}</title>\n"
+        f"<style>\n{document.css}\n</style>\n"
+        "</head>\n"
+        "<body>\n"
+        f'<article class="{escape(document.body_class)}">\n'
+        f"{document.body_html}\n"
+        "</article>\n"
+        "</body>\n"
+        "</html>\n"
+    )
+
+
+def render_pdf(
+    *, document: ConvertedDocument, title: str, output: Path, base_url: str
+) -> None:
+    """Render an HTML body fragment to a PDF file at ``output``.
+
+    ``base_url`` is used to resolve relative resources (e.g. local images) in the
+    source document, so it should point at the source file's directory.
+    """
+    document_html = html_document(document, title=title)
+    html_factory = _load_weasy_html()
+
+    try:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        html_factory(string=document_html, base_url=base_url).write_pdf(str(output))
+    except OSError as exc:
+        raise RenderError(f"cannot write {output}: {exc}") from exc
+
+
+# --------------------------------------------------------------------------- #
+# Orchestration
+# --------------------------------------------------------------------------- #
+def convert_file(
+    source: Path,
+    output: Path,
+    *,
+    registry: ConverterRegistry,
+    title: str | None = None,
+) -> None:
+    """Convert ``source`` to a PDF at ``output`` using a registered converter."""
+    converter = registry.for_path(source)
+    document = converter.convert(source)
+    render_pdf(
+        document=document,
+        title=title or source.stem,
+        output=output,
+        base_url=str(source.resolve().parent),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Command-line interface
+# --------------------------------------------------------------------------- #
+def build_arg_parser() -> argparse.ArgumentParser:
+    """Construct the command-line argument parser."""
+    parser = argparse.ArgumentParser(
+        prog="to_pdf",
+        description="Convert a supported document to PDF.",
+    )
+    parser.add_argument("input", nargs="?", help="path to the source document")
+    parser.add_argument(
+        "-o",
+        "--output",
+        metavar="PATH",
+        help="output PDF path (default: input file with a .pdf extension)",
+    )
+    parser.add_argument(
+        "-t",
+        "--title",
+        help="document title for PDF metadata (default: input file name)",
+    )
+    parser.add_argument(
+        "--syntax-theme",
+        default=DEFAULT_SYNTAX_THEME,
+        help="Pygments style for code blocks (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--list-formats",
+        action="store_true",
+        help="list supported input formats and exit",
+    )
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {__version__}"
+    )
+    return parser
+
+
+def _print_formats(registry: ConverterRegistry) -> None:
+    print("Supported input formats:")
+    for converter in registry.converters():
+        exts = ", ".join(converter.extensions)
+        print(f"  {converter.name}: {exts}")
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """CLI entry point. Returns a process exit code."""
+    args = build_arg_parser().parse_args(argv)
+    registry = build_registry(syntax_theme=args.syntax_theme)
+
+    if args.list_formats:
+        _print_formats(registry)
+        return 0
+
+    if not args.input:
+        print("error: the 'input' argument is required", file=sys.stderr)
+        return 2
+
+    source = Path(args.input)
+    if not source.is_file():
+        print(f"error: no such file: {source}", file=sys.stderr)
+        return 2
+
+    output = Path(args.output) if args.output else source.with_suffix(".pdf")
+
+    try:
+        convert_file(source, output, registry=registry, title=args.title)
+    except ToPdfError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"Wrote {output}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
