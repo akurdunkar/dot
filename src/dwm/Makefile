@@ -13,7 +13,7 @@ XINERAMAFLAGS = -DXINERAMA
 
 # includes and libs
 INCS = -I/usr/include/freetype2
-LIBS = -lX11 ${XINERAMALIBS} -lXft -lfontconfig
+LIBS = -lX11 ${XINERAMALIBS} -lXft -lfontconfig -lXcomposite -lXdamage
 
 # flags
 CPPFLAGS = -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L -DVERSION=\"${VERSION}\" ${XINERAMAFLAGS}

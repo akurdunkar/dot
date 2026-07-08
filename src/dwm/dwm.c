@@ -40,6 +40,8 @@
 #include <X11/extensions/Xinerama.h>
 #endif /* XINERAMA */
 #include <X11/Xft/Xft.h>
+#include <X11/extensions/Xcomposite.h>
+#include <X11/extensions/Xdamage.h>
 
 #include "drw.h"
 #include "util.h"
@@ -201,6 +203,9 @@ typedef struct Systray Systray;
 struct Systray {
   Window win;
   Client *icons;
+  Pixmap pixmap; /* composite backing pixmap, mirrored onto other bars */
+  unsigned int pw, ph;
+  Damage damage;
 };
 
 /* function declarations */
@@ -227,6 +232,8 @@ static Monitor *dirtomon(int dir);
 static void drawbar(Monitor *m);
 static void drawbars(void);
 static int drawstatusbar(Monitor *m, int bh, char *text);
+static void drawsystraymirror(Monitor *m);
+static void drawsystraymirrors(void);
 static void enternotify(XEvent *e);
 static void expose(XEvent *e);
 static void focus(Client *c);
@@ -287,6 +294,7 @@ static void spawn(const Arg *arg);
 static void spawnenv(const Arg *arg);
 static void spawnscratch(const Arg *arg);
 static Monitor *systraytomon(Monitor *m);
+static unsigned int systraywidthon(Monitor *m);
 static void tag(const Arg *arg);
 static void tagmon(const Arg *arg);
 static void tile(Monitor *);
@@ -325,6 +333,8 @@ static void grid(Monitor *m);
 
 /* variables */
 static Systray *systray = NULL;
+static int canmirrorsystray = 0; /* composite+damage available */
+static int damageeventbase;
 static const char broken[] = "broken";
 static char stext[1024];
 static int screen;
@@ -551,6 +561,8 @@ void buttonpress(XEvent *e) {
       arg.ui = 1 << i;
     } else if (ev->x < x + blw)
       click = ClkLtSymbol;
+    else if (ev->x >= selmon->ww - (int)systraywidthon(selmon))
+      click = ClkRootWin; /* mirrored systray; the real tray follows focus */
     else if (ev->x >
              selmon->ww - (int)TEXTW(stext) - getsystraywidth() + lrpad - 2)
       click = ClkStatusText;
@@ -609,7 +621,11 @@ void cleanup(void) {
   XUngrabKey(dpy, AnyKey, AnyModifier, root);
   while (mons)
     cleanupmon(mons);
-  if (showsystray) {
+  if (showsystray && systray) {
+    if (systray->damage)
+      XDamageDestroy(dpy, systray->damage);
+    if (systray->pixmap)
+      XFreePixmap(dpy, systray->pixmap);
     XUnmapWindow(dpy, systray->win);
     XDestroyWindow(dpy, systray->win);
     free(systray);
@@ -695,8 +711,8 @@ void clientmessage(XEvent *e) {
       sendevent(c->win, netatom[Xembed], StructureNotifyMask, CurrentTime,
                 XEMBED_MODALITY_ON, 0, systray->win, XEMBED_EMBEDDED_VERSION);
       XSync(dpy, False);
-      resizebarwin(selmon);
       updatesystray();
+      drawbars();
       setclientstate(c, NormalState);
     }
     return;
@@ -833,8 +849,8 @@ void destroynotify(XEvent *e) {
     unmanage(c, 1);
   else if ((c = wintosystrayicon(ev->window))) {
     removesystrayicon(c);
-    resizebarwin(selmon);
     updatesystray();
+    drawbars();
   }
 }
 
@@ -914,7 +930,7 @@ int drawstatusbar(Monitor *m, int bh, char *stext) {
 
   w += 2; /* 1px padding on both sides */
   ret = m->ww - w;
-  x = m->ww - w - getsystraywidth();
+  x = m->ww - w - (systrayonleft ? getsystraywidth() : systraywidthon(m));
 
   drw_setscheme(drw, scheme[LENGTH(colors)]);
   drw->scheme[ColFg] = scheme[SchemeNorm][ColFg];
@@ -991,13 +1007,10 @@ void drawbar(Monitor *m) {
   unsigned int i, occ = 0, urg = 0;
   Client *c;
 
-  if (showsystray && m == systraytomon(m) && !systrayonleft)
-    stw = getsystraywidth();
+  stw = systraywidthon(m);
 
   /* draw status first so it can be overdrawn by tags later */
-  if (m == selmon) { /* status is only drawn on selected monitor */
-    tw = m->ww - drawstatusbar(m, bh, stext);
-  }
+  tw = m->ww - drawstatusbar(m, bh, stext);
 
   for (c = m->clients; c; c = c->next) {
     if (ISVISIBLE(c))
@@ -1054,6 +1067,10 @@ void drawbar(Monitor *m) {
   m->bt = n;
   m->btw = w;
   drw_map(drw, m->barwin, 0, 0, m->ww - stw, bh);
+  if (showsystray && m == systraytomon(m))
+    updatesystray();
+  else
+    drawsystraymirror(m);
 }
 
 void drawbars(void) {
@@ -1061,6 +1078,27 @@ void drawbars(void) {
 
   for (m = mons; m; m = m->next)
     drawbar(m);
+}
+
+/* blit a live copy of the systray contents onto the bar of a monitor the
+ * real (XEMBED) tray window is not on; icon windows can only exist once */
+void drawsystraymirror(Monitor *m) {
+  unsigned int stw;
+
+  if (!canmirrorsystray || !showsystray || !systray || !systray->pixmap ||
+      systrayonleft || !m->barwin || m == systraytomon(m))
+    return;
+  if (!(stw = getsystraywidth()))
+    return;
+  XCopyArea(dpy, systray->pixmap, m->barwin, drw->gc, 0, 0,
+            MIN(stw, systray->pw), bh, m->ww - stw, 0);
+}
+
+void drawsystraymirrors(void) {
+  Monitor *m;
+
+  for (m = mons; m; m = m->next)
+    drawsystraymirror(m);
 }
 
 void enternotify(XEvent *e) {
@@ -1085,11 +1123,8 @@ void expose(XEvent *e) {
   Monitor *m;
   XExposeEvent *ev = &e->xexpose;
 
-  if (ev->count == 0 && (m = wintomon(ev->window))) {
+  if (ev->count == 0 && (m = wintomon(ev->window)))
     drawbar(m);
-    if (m == selmon)
-      updatesystray();
-  }
 }
 
 void focus(Client *c) {
@@ -1287,7 +1322,7 @@ long getstate(Window w) {
 unsigned int getsystraywidth() {
   unsigned int w = 0;
   Client *i;
-  if (showsystray)
+  if (showsystray && systray)
     for (i = systray->icons; i; w += i->w + systrayspacing, i = i->next)
       ;
   return w ? w + systrayspacing : 0;
@@ -1501,8 +1536,8 @@ void maprequest(XEvent *e) {
   if ((i = wintosystrayicon(ev->window))) {
     sendevent(i->win, netatom[Xembed], StructureNotifyMask, CurrentTime,
               XEMBED_WINDOW_ACTIVATE, 0, systray->win, XEMBED_EMBEDDED_VERSION);
-    resizebarwin(selmon);
     updatesystray();
+    drawbars();
   }
 
   if (!XGetWindowAttributes(dpy, ev->window, &wa))
@@ -1624,8 +1659,8 @@ void propertynotify(XEvent *e) {
       updatesystrayicongeom(c, c->w, c->h);
     } else
       updatesystrayiconstate(c, ev);
-    resizebarwin(selmon);
     updatesystray();
+    drawbars();
   }
   if ((ev->window == root) && (ev->atom == XA_WM_NAME))
     updatestatus();
@@ -1698,11 +1733,10 @@ void resize(Client *c, int x, int y, int w, int h, int interact) {
     resizeclient(c, x, y, w, h);
 }
 
+/* bars are always full width; the real systray window overlays the bar of
+ * its monitor, all other bars show a mirror in the same spot */
 void resizebarwin(Monitor *m) {
-  unsigned int w = m->ww;
-  if (showsystray && m == systraytomon(m) && !systrayonleft)
-    w -= getsystraywidth();
-  XMoveResizeWindow(dpy, m->barwin, m->wx, m->by, w, bh);
+  XMoveResizeWindow(dpy, m->barwin, m->wx, m->by, m->ww, bh);
 }
 
 void resizeclient(Client *c, int x, int y, int w, int h) {
@@ -1791,8 +1825,8 @@ void resizerequest(XEvent *e) {
 
   if ((i = wintosystrayicon(ev->window))) {
     updatesystrayicongeom(i, ev->width, ev->height);
-    resizebarwin(selmon);
     updatesystray();
+    drawbars();
   }
 }
 
@@ -1824,9 +1858,18 @@ void run(void) {
   XEvent ev;
   /* main event loop */
   XSync(dpy, False);
-  while (running && !XNextEvent(dpy, &ev))
-    if (handler[ev.type])
+  while (running && !XNextEvent(dpy, &ev)) {
+    if (canmirrorsystray && systray &&
+        ev.type == damageeventbase + XDamageNotify) {
+      if (((XDamageNotifyEvent *)&ev)->drawable == systray->win) {
+        XDamageSubtract(dpy, systray->damage, None, None);
+        drawsystraymirrors();
+      }
+      continue;
+    }
+    if (ev.type < LASTEvent && handler[ev.type])
       handler[ev.type](&ev); /* call handler */
+  }
 }
 
 void runAutostart(void) {
@@ -1987,7 +2030,7 @@ void setmfact(const Arg *arg) {
 }
 
 void setup(void) {
-  int i;
+  int i, di, cmaj, cmin;
   XSetWindowAttributes wa;
   Atom utf8string;
 
@@ -2043,6 +2086,11 @@ void setup(void) {
   scheme[LENGTH(colors)] = drw_scm_create(drw, colors[0], 3);
   for (i = 0; i < LENGTH(colors); i++)
     scheme[i] = drw_scm_create(drw, colors[i], 3);
+  /* systray mirrors need composite >= 0.2 (named pixmaps) and damage */
+  if (XCompositeQueryExtension(dpy, &di, &di) &&
+      XCompositeQueryVersion(dpy, &cmaj, &cmin) && (cmaj > 0 || cmin >= 2) &&
+      XDamageQueryExtension(dpy, &damageeventbase, &di))
+    canmirrorsystray = 1;
   /* init system tray */
   updatesystray();
   /* init bars */
@@ -2353,26 +2401,23 @@ void unmapnotify(XEvent *e) {
 }
 
 void updatebars(void) {
-  unsigned int w;
   Monitor *m;
   XSetWindowAttributes wa = {.override_redirect = True,
                              .background_pixmap = ParentRelative,
-                             .event_mask = ButtonPressMask | ExposureMask};
+                             .event_mask = ButtonPressMask | ExposureMask |
+                                           EnterWindowMask};
   XClassHint ch = {"dwm", "dwm"};
   for (m = mons; m; m = m->next) {
     if (m->barwin)
       continue;
-    w = m->ww;
-    if (showsystray && m == systraytomon(m))
-      w -= getsystraywidth();
     m->barwin = XCreateWindow(
-        dpy, root, m->wx, m->by, w, bh, 0, DefaultDepth(dpy, screen),
+        dpy, root, m->wx, m->by, m->ww, bh, 0, DefaultDepth(dpy, screen),
         CopyFromParent, DefaultVisual(dpy, screen),
         CWOverrideRedirect | CWBackPixmap | CWEventMask, &wa);
     XDefineCursor(dpy, m->barwin, cursor[CurNormal]->cursor);
-    if (showsystray && m == systraytomon(m))
-      XMapRaised(dpy, systray->win);
     XMapRaised(dpy, m->barwin);
+    if (showsystray && systray)
+      XMapRaised(dpy, systray->win);
     XSetClassHint(dpy, m->barwin, &ch);
   }
 }
@@ -2532,8 +2577,7 @@ void updatesizehints(Client *c) {
 void updatestatus(void) {
   if (!gettextprop(root, XA_WM_NAME, stext, sizeof(stext)))
     strcpy(stext, "dwm-" VERSION);
-  drawbar(selmon);
-  updatesystray();
+  drawbars();
 }
 
 void updatesystrayicongeom(Client *i, int w, int h) {
@@ -2600,6 +2644,11 @@ void updatesystray(void) {
       die("fatal: could not malloc() %u bytes\n", sizeof(Systray));
     systray->win = XCreateSimpleWindow(dpy, root, x, m->by, w, bh, 0, 0,
                                        scheme[SchemeSel][ColBg].pixel);
+    if (canmirrorsystray) {
+      XCompositeRedirectWindow(dpy, systray->win, CompositeRedirectAutomatic);
+      systray->damage =
+          XDamageCreate(dpy, systray->win, XDamageReportNonEmpty);
+    }
     wa.event_mask = ButtonPressMask | ExposureMask;
     wa.override_redirect = True;
     wa.background_pixel = scheme[SchemeNorm][ColBg].pixel;
@@ -2648,9 +2697,19 @@ void updatesystray(void) {
                    &wc);
   XMapWindow(dpy, systray->win);
   XMapSubwindows(dpy, systray->win);
+  /* the server reallocates the backing pixmap whenever the tray resizes */
+  if (canmirrorsystray &&
+      (!systray->pixmap || systray->pw != w || systray->ph != (unsigned)bh)) {
+    if (systray->pixmap)
+      XFreePixmap(dpy, systray->pixmap);
+    systray->pixmap = XCompositeNameWindowPixmap(dpy, systray->win);
+    systray->pw = w;
+    systray->ph = bh;
+  }
   /* redraw background */
   XSetForeground(dpy, drw->gc, scheme[SchemeNorm][ColBg].pixel);
   XFillRectangle(dpy, systray->win, drw->gc, 0, 0, w, bh);
+  drawsystraymirrors();
   XSync(dpy, False);
 }
 
@@ -2712,7 +2771,7 @@ Client *wintoclient(Window w) {
 Client *wintosystrayicon(Window w) {
   Client *i = NULL;
 
-  if (!showsystray || !w)
+  if (!showsystray || !systray || !w)
     return i;
   for (i = systray->icons; i && i->win != w; i = i->next)
     ;
@@ -2778,6 +2837,16 @@ Monitor *systraytomon(Monitor *m) {
   if (systraypinningfailfirst && n < systraypinning)
     return mons;
   return t;
+}
+
+/* width reserved at the right end of m's bar for the systray: the real tray
+ * window on its own monitor, a composited mirror of it everywhere else */
+unsigned int systraywidthon(Monitor *m) {
+  if (!showsystray || systrayonleft)
+    return 0;
+  if (m == systraytomon(m) || canmirrorsystray)
+    return getsystraywidth();
+  return 0;
 }
 
 void zoom(const Arg *arg) {
