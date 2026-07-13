@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Print today's ccusage cost per model family for the tmux status bar, e.g.
-# "Fable: $41.163  Opus: $1.160".
+# Print today's ccusage cost for every model family used in the tmux status bar,
+# e.g. "FAB: $41.163  OPU: $1.160  SOL: $2.718".
 # ccusage runs via npx and can take a few seconds, so the result is cached and
 # refreshed in the background to avoid blocking the status redraw.
 
 cache="${TMPDIR:-/tmp}/ccusage-today.txt"
-ttl=60  # seconds
+ttl=15  # seconds
 
 mtime=$(stat -c %Y "$cache" 2>/dev/null || echo 0)
 now=$(date +%s)
@@ -17,16 +17,17 @@ if [ ! -s "$cache" ] || [ "$((now - mtime))" -ge "$ttl" ]; then
     day=$(date +%Y%m%d)
     # Sum cost per model family (case-insensitive match on the model name so
     # bedrock/other variants are included too).
-    read -r fable opus < <(
+    read -r fable opus sol < <(
       npx -y ccusage@latest daily --since "$day" --until "$day" --json 2>/dev/null \
         | jq -r '
             [.daily[].modelBreakdowns[]] as $m
             | ([$m[] | select(.modelName | ascii_downcase | contains("fable")) | .cost] | add // 0) as $f
             | ([$m[] | select(.modelName | ascii_downcase | contains("opus"))  | .cost] | add // 0) as $o
-            | "\($f) \($o)"'
+            | ([$m[] | select(.modelName | ascii_downcase | contains("sol"))   | .cost] | add // 0) as $s
+            | "\($f) \($o) \($s)"'
     )
     if [ -n "$fable" ]; then
-      printf 'Fable: $%.3f  Opus: $%.3f' "$fable" "$opus" > "$cache"
+      printf 'FAB: $%.3f  OPU: $%.3f  SOL: $%.3f' "$fable" "$opus" "$sol" > "$cache"
     fi
   ) >/dev/null 2>&1 &
 fi
@@ -34,5 +35,5 @@ fi
 if [ -s "$cache" ]; then
   cat "$cache"
 else
-  printf 'Fable: $--  Opus: $--'
+  printf 'FAB: $--  OPU: $--  SOL: $--'
 fi
