@@ -32,12 +32,6 @@
             "nvim": {
                 "repo": "neovim/neovim",
                 "artifact": "nvim-linux-x86_64.appimage",
-                "requires": [
-                    "github/rustup"
-                ],
-                "pre": [
-                    "cargo install --locked tree-sitter-cli"
-                ],
                 "cmds": [
                     "cp {artifact} {install_dir}/nvim",
                     "chmod +x {install_dir}/nvim"
@@ -173,5 +167,17 @@
                 ]
             }
         }
+    },
+    "cargo": {
+        "requires": [
+            "github"
+        ],
+        "packages": [
+            "tree-sitter-cli",
+            "eza",
+            "ripgrep",
+            "git-delta",
+            "alacritty"
+        ]
     }
 }

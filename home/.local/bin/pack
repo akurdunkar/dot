@@ -585,27 +585,8 @@ class AptSourceHandler:
 
         with log_ctx.lock:
             log_ctx.file.write(f"=== {name} (apt) ===\n")
-            log_ctx.file.write(f"$ {cmd}\n")
 
-        with subprocess.Popen(
-            cmd,
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        ) as proc:
-            assert proc.stdout is not None
-            for line in proc.stdout:
-                raw: str = line.rstrip("\n")
-                task.detail = raw
-                with log_ctx.lock:
-                    log_ctx.file.write(line)
-            returncode: int = proc.wait()
-
-        with log_ctx.lock:
-            log_ctx.file.write(f"exit {returncode}\n\n")
-            log_ctx.file.flush()
-
+        returncode: int = _stream_shell_cmd(cmd, task, log_ctx)
         if returncode != 0:
             raise RuntimeError(f"apt-get install failed (exit {returncode}): {name}")
 
@@ -648,6 +629,143 @@ class AptSourceHandler:
                     raise PackageError(f"no candidate version for {name}")
                 return candidate
         raise PackageError(f"could not parse apt-cache policy output for {name}")
+
+
+class CargoSourceHandler:
+    """SourceHandler implementation for crates.io packages."""
+
+    # cargo builds already use every core; parallel installs just thrash.
+    parallel: bool = False
+
+    def __init__(self) -> None:
+        self._installed: dict[str, str] = self._get_installed_crates()
+
+    def resolve(  # pylint: disable=unused-argument
+        self,
+        name: str,
+        pkg_config: PkgConfig,
+        current_version: str,
+        force: bool,
+    ) -> ResolveResult:
+        try:
+            latest: str = self._get_latest_version(name)
+            installed: str = self._installed.get(name, "none")
+            return ResolveResult(
+                name=name,
+                current_version=installed,
+                latest_version=latest,
+                needs_update=force or installed != latest,
+                extra={},
+            )
+        except (PackageError, requests.RequestException) as e:
+            return ResolveResult(
+                name=name,
+                current_version=current_version,
+                latest_version="",
+                needs_update=False,
+                extra={},
+                error=str(e),
+            )
+
+    def install(  # pylint: disable=too-many-arguments,too-many-positional-arguments,unused-argument
+        self,
+        name: str,
+        pkg_config: PkgConfig,
+        resolved: ResolveResult,
+        task: PackageTask,
+        log_ctx: LogContext,
+    ) -> LockEntry:
+        task.status = "building"
+        cmd: str = (
+            f"cargo install --locked --version {resolved.latest_version} {name}"
+        )
+
+        with log_ctx.lock:
+            log_ctx.file.write(f"=== {name} (cargo) ===\n")
+
+        returncode: int = _stream_shell_cmd(cmd, task, log_ctx)
+        if returncode != 0:
+            raise RuntimeError(f"cargo install failed (exit {returncode}): {name}")
+
+        return LockEntry(
+            version=resolved.latest_version,
+            installed_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+    @staticmethod
+    def _get_installed_crates() -> dict[str, str]:
+        """Parse `cargo install --list` into a {crate: version} map."""
+        try:
+            result: subprocess.CompletedProcess[str] = subprocess.run(
+                ["cargo", "install", "--list"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except FileNotFoundError:
+            return {}
+        if result.returncode != 0:
+            return {}
+
+        installed: dict[str, str] = {}
+        for line in result.stdout.splitlines():
+            # header lines look like "ripgrep v14.1.0:"; binaries are indented
+            if line.startswith(" ") or not line.endswith(":"):
+                continue
+            parts: list[str] = line[:-1].split()
+            if len(parts) >= 2 and parts[1].startswith("v"):
+                installed[parts[0]] = parts[1][1:]
+        return installed
+
+    @staticmethod
+    def _get_latest_version(name: str) -> str:
+        resp: requests.Response = requests.get(
+            f"https://crates.io/api/v1/crates/{name}",
+            headers={"User-Agent": "pack (https://github.com/aditya-k2/dot)"},
+            timeout=HTTP_TIMEOUT,
+        )
+        if resp.status_code == 404:
+            raise PackageError(f"crate not found: {name}")
+        resp.raise_for_status()
+        crate: dict[str, Any] = resp.json().get("crate", {})
+        version: str | None = crate.get("max_stable_version") or crate.get(
+            "max_version"
+        )
+        if not version:
+            raise PackageError(f"could not determine latest version of {name}")
+        return version
+
+
+def _stream_shell_cmd(
+    cmd: str,
+    task: PackageTask,
+    log_ctx: LogContext,
+    cwd: str | None = None,
+) -> int:
+    """Run a shell command, mirroring output to task.detail and the log."""
+    with log_ctx.lock:
+        log_ctx.file.write(f"$ {cmd}\n")
+
+    with subprocess.Popen(
+        cmd,
+        shell=True,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    ) as proc:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            task.detail = line.rstrip("\n")
+            with log_ctx.lock:
+                log_ctx.file.write(line)
+        returncode: int = proc.wait()
+
+    with log_ctx.lock:
+        log_ctx.file.write(f"exit {returncode}\n\n")
+        log_ctx.file.flush()
+
+    return returncode
 
 
 def _run_build_cmds_captured(
@@ -964,6 +1082,8 @@ def _get_source_handler(
         return GithubSourceHandler(source_config)
     if source_name == "apt":
         return AptSourceHandler()
+    if source_name == "cargo":
+        return CargoSourceHandler()
     return None
 
 
@@ -1104,6 +1224,10 @@ package config (~/pkg.json):
     artifact      release asset name (omit for source tarball, supports {version})
     requires      package deps (bare name = same source, source/name = cross-source)
     pre           shell commands to run before download
+
+  simple sources (apt, cargo):
+    packages      array of package names; apt installs via apt-get,
+                  cargo resolves crates.io and installs via cargo install
 
   template variables for cmds: {artifact} {install_dir} {version} {tmpdir} + vars
   template variables for pre:  {install_dir} {version} + vars
