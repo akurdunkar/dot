@@ -1,39 +1,726 @@
-#!/usr/bin/env bash
-# Print today's ccusage cost for every model family used in the tmux status bar,
-# e.g. "FAB: $41.163  OPU: $1.160  SOL: $2.718".
-# ccusage runs via npx and can take a few seconds, so the result is cached and
-# refreshed in the background to avoid blocking the status redraw.
+#!/usr/bin/env python3
+"""Print today's agent-CLI cost per model family for the tmux status bar,
+e.g. "FAB: $41.163  OPU: $1.160  SOL: $2.718".
 
-cache="${TMPDIR:-/tmp}/ccusage-today.txt"
-ttl=15  # seconds
+Local Python clone of `ccusage daily` (v20 Rust implementation): parses Claude
+Code transcripts (~/.claude/projects/**/*.jsonl) and Codex sessions
+(~/.codex/sessions) directly -- no node/npx. Matches ccusage's semantics:
 
-mtime=$(stat -c %Y "$cache" 2>/dev/null || echo 0)
-now=$(date +%s)
+  - Claude: drop lines with ":null" in ccusage's unsupported-field set and
+    entries failing its validity checks; use a stored numeric costUSD verbatim
+    (CostMode::Auto), else price tokens; dedupe by (message.id, requestId)
+    keeping the richest copy (non-sidechain > token total > cost > has-speed),
+    merging sidechain replays of the same message id
+  - cost = tokens x LiteLLM pricing; 5m cache writes at the cache-create rate,
+    1h cache writes at input x2, marginal above-200k tiers, whole-request
+    long-context switching when a threshold applies, "fast" speed multiplier
+  - model -> pricing uses ccusage's boundary-aware bidirectional substring
+    match (longest key wins), so dated/Bedrock/[1m] variants resolve
+  - Codex: token_count deltas per rollout, deduped globally on
+    (timestamp, model, token counts) and by relative path across
+    sessions/ vs archived_sessions/; replay/forked sessions skip only the
+    replayed same-second prefix; events above the model's long-context
+    threshold (272k for the gpt-5.5/5.6 family, ccusage's builtin table)
+    are billed entirely at long-context rates; a service_tier = "fast" or
+    "priority" in ~/.codex/config.toml doubles codex cost like ccusage
 
-if [ ! -s "$cache" ] || [ "$((now - mtime))" -ge "$ttl" ]; then
-  # Touch first so concurrent redraws don't all spawn a refresh.
-  touch "$cache" 2>/dev/null
-  (
-    day=$(date +%Y%m%d)
-    # Sum cost per model family (case-insensitive match on the model name so
-    # bedrock/other variants are included too).
-    read -r fable opus sol < <(
-      npx -y ccusage@latest daily --since "$day" --until "$day" --json 2>/dev/null \
-        | jq -r '
-            [.daily[].modelBreakdowns[]] as $m
-            | ([$m[] | select(.modelName | ascii_downcase | contains("fable")) | .cost] | add // 0) as $f
-            | ([$m[] | select(.modelName | ascii_downcase | contains("opus"))  | .cost] | add // 0) as $o
-            | ([$m[] | select(.modelName | ascii_downcase | contains("sol"))   | .cost] | add // 0) as $s
-            | "\($f) \($o) \($s)"'
-    )
-    if [ -n "$fable" ]; then
-      printf 'FAB: $%.3f  OPU: $%.3f  SOL: $%.3f' "$fable" "$opus" "$sol" > "$cache"
-    fi
-  ) >/dev/null 2>&1 &
-fi
+Pricing is fetched from LiteLLM at most daily and cached (stale cache reused
+with hourly refetch attempts when offline; embedded fallback as last resort).
+The result is cached and refreshed in the background so the tmux status
+redraw never blocks; refresh crashes leave the last good value in place and
+a traceback in the error log.
+"""
 
-if [ -s "$cache" ]; then
-  cat "$cache"
-else
-  printf 'FAB: $--  OPU: $--  SOL: $--'
-fi
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import time
+import traceback
+from datetime import datetime
+from pathlib import Path
+
+UID = os.getuid()
+CACHE = Path(tempfile.gettempdir()) / f"ccusage-today-{UID}.txt"
+ERROR_LOG = Path(tempfile.gettempdir()) / f"ccusage-refresh-error-{UID}.txt"
+TTL = 15  # seconds
+
+PRICING_URL = ("https://raw.githubusercontent.com/BerriAI/litellm/main/"
+               "model_prices_and_context_window.json")
+XDG_CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+PRICING_CACHE = XDG_CACHE / "get_ccusage_pricing.json"
+PRICING_TTL = 24 * 3600
+PRICING_RETRY = 3600  # refetch cadence while the network is failing
+
+XDG_CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+CLAUDE_ROOTS = [Path.home() / ".claude" / "projects",
+                XDG_CONFIG / "claude" / "projects"]
+CODEX_HOMES = ([Path(p.strip()) for p in os.environ["CODEX_HOME"].split(",") if p.strip()]
+               if os.environ.get("CODEX_HOME") else [Path.home() / ".codex"])
+
+# (label, substring matched case-insensitively against the model name)
+FAMILIES = [("FAB", "fable"), ("OPU", "opus"), ("SOL", "sol")]
+
+CACHE_CREATE_1H_INPUT_MULTIPLIER = 2.0
+DEFAULT_LONG_CONTEXT_THRESHOLD = 200_000   # litellm *_above_200k boundary
+OPENAI_LONG_CONTEXT_THRESHOLD = 272_000
+
+# ccusage's hardcoded OpenAI long-context table (pricing.rs
+# builtin_long_context_rates): model -> (input, output, cache_create,
+# cache_read) USD/token for requests above OPENAI_LONG_CONTEXT_THRESHOLD.
+# Applied only when LiteLLM supplies no *_above_200k fields for the model.
+BUILTIN_LONG_CONTEXT = {
+    "gpt-5.6-sol":   (10e-6, 45e-6, 12.5e-6, 1e-6),
+    "gpt-5.6-terra": (5e-6, 22.5e-6, 6.25e-6, 0.5e-6),
+    "gpt-5.6-luna":  (2e-6, 9e-6, 2.5e-6, 0.2e-6),
+    "gpt-5.5":       (10e-6, 45e-6, 10e-6, 1e-6),
+    "gpt-5.4":       (5e-6, 22.5e-6, 5e-6, 0.5e-6),
+    "gpt-5.5-pro":   (60e-6, 270e-6, None, None),
+    "gpt-5.4-pro":   (60e-6, 270e-6, None, None),
+}
+
+# ccusage's embedded fast-multiplier fallback (fast-multiplier-overrides.json),
+# consulted when LiteLLM's entry carries no provider_specific_entry.fast.
+FAST_MULTIPLIER_EXACT = {"gpt-5.5": 2.5, "gpt-5.4": 2.0, "gpt-5.3-codex": 2.0}
+FAST_MULTIPLIER_PREFIX = {"claude-opus-4-6": 6.0, "claude-opus-4-7": 6.0,
+                          "claude-opus-4-8": 2.0}
+
+# ccusage drops any line containing "<field>":null for these fields
+# (adapter/claude/mod.rs has_unsupported_null_field) -- they occur in real
+# logs and its schema cannot represent them.
+UNSUPPORTED_NULL_FIELDS = frozenset((
+    b"id", b"cwd", b"model", b"speed", b"costUSD", b"version", b"sessionId",
+    b"requestId", b"isApiErrorMessage", b"cache_read_input_tokens",
+    b"cache_creation_input_tokens",
+))
+
+# USD per token, snapshot of LiteLLM data; used only if the fetch fails
+# before any pricing cache exists.
+FALLBACK_PRICING = {
+    "claude-fable-5": {"input_cost_per_token": 10e-6,
+                       "output_cost_per_token": 50e-6,
+                       "cache_creation_input_token_cost": 12.5e-6,
+                       "cache_read_input_token_cost": 1e-6},
+    "claude-opus-4-8": {"input_cost_per_token": 5e-6,
+                        "output_cost_per_token": 25e-6,
+                        "cache_creation_input_token_cost": 6.25e-6,
+                        "cache_read_input_token_cost": 0.5e-6,
+                        "provider_specific_entry": {"fast": 2.0}},
+    "claude-sonnet-5": {"input_cost_per_token": 2e-6,
+                        "output_cost_per_token": 10e-6,
+                        "cache_creation_input_token_cost": 2.5e-6,
+                        "cache_read_input_token_cost": 0.2e-6},
+    "claude-haiku-4-5": {"input_cost_per_token": 1e-6,
+                         "output_cost_per_token": 5e-6,
+                         "cache_creation_input_token_cost": 1.25e-6,
+                         "cache_read_input_token_cost": 0.1e-6},
+    "gpt-5.6-sol": {"input_cost_per_token": 5e-6,
+                    "output_cost_per_token": 30e-6,
+                    "cache_read_input_token_cost": 0.5e-6},
+}
+
+
+def _num(value, default=0):
+    """A token count, defaulting explicit JSON nulls/garbage like absence."""
+    return value if isinstance(value, (int, float)) and not isinstance(value, bool) \
+        else default
+
+
+def atomic_write(path, text):
+    tmp = path.with_suffix(f".{os.getpid()}.tmp")
+    tmp.write_text(text)
+    tmp.replace(path)
+
+
+def local_date(timestamp):
+    try:
+        return datetime.fromisoformat(timestamp).astimezone().date()
+    except (ValueError, TypeError):
+        return None
+
+
+# --- pricing ---------------------------------------------------------------
+
+def load_raw_pricing():
+    try:
+        if time.time() - PRICING_CACHE.stat().st_mtime < PRICING_TTL:
+            return json.loads(PRICING_CACHE.read_text())
+    except (OSError, json.JSONDecodeError):
+        pass
+    raw = None
+    try:
+        import urllib.request
+        with urllib.request.urlopen(PRICING_URL, timeout=10) as resp:
+            fetched = json.loads(resp.read())
+        if isinstance(fetched, dict):
+            raw = fetched
+    except Exception:
+        pass
+    if raw is not None:
+        try:  # best-effort: a failed cache write must not discard the download
+            PRICING_CACHE.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write(PRICING_CACHE, json.dumps(raw))
+        except OSError:
+            pass
+        return raw
+    try:
+        stale = json.loads(PRICING_CACHE.read_text())
+        # Serve stale and back off: retry the network in an hour, not 10s
+        # blocked on a dead network every 15s refresh.
+        now = time.time()
+        os.utime(PRICING_CACHE, (now, now - PRICING_TTL + PRICING_RETRY))
+        return stale
+    except (OSError, json.JSONDecodeError):
+        return FALLBACK_PRICING
+
+
+def strip_date_suffix(model):
+    if len(model) > 11 and re.search(r"-\d{4}-\d{2}-\d{2}$", model):
+        return model[:-11]
+    if len(model) > 9 and re.search(r"-\d{8}$", model):
+        return model[:-9]
+    return model
+
+
+def long_context_split_threshold(model):
+    return (OPENAI_LONG_CONTEXT_THRESHOLD
+            if strip_date_suffix(model) in BUILTIN_LONG_CONTEXT
+            else DEFAULT_LONG_CONTEXT_THRESHOLD)
+
+
+def _normalized_key(value):
+    return value.replace(".", "-").replace("@", "-") \
+        if "." in value or "@" in value else value
+
+
+def _suffix_blocks_version(key, suffix):
+    # "claude-sonnet-4" must not match "claude-sonnet-4-5", but an 8-digit
+    # date suffix like "-20251001" is allowed through.
+    if not key[-1].isdigit() or suffix[0] not in "-.":
+        return False
+    digits = 0
+    while 1 + digits < len(suffix) and suffix[1 + digits].isdigit():
+        digits += 1
+    if digits < 1:
+        return False
+    after = suffix[1 + digits:2 + digits]
+    return not (digits == 8 and (not after or not after.isalnum()))
+
+
+def _contains_pricing_key(value, key):
+    if not key:
+        return False
+    start = 0
+    while (i := value.find(key, start)) != -1:
+        boundary_before = i == 0 or not value[i - 1].isalnum()
+        suffix = value[i + len(key):]
+        if boundary_before and (not suffix or (not suffix[0].isalnum()
+                                and not _suffix_blocks_version(key, suffix))):
+            return True
+        start = i + 1
+    return False
+
+
+def fast_multiplier_override(model):
+    if model in FAST_MULTIPLIER_EXACT:
+        return FAST_MULTIPLIER_EXACT[model]
+    for part in re.split(r"[/:]", _normalized_key(model)):
+        for base, multiplier in FAST_MULTIPLIER_PREFIX.items():
+            i = part.rfind(base)
+            if i != -1:
+                after = part[i + len(base):i + len(base) + 1]
+                if after in ("", "-"):
+                    return multiplier
+    return None
+
+
+def _pricing_key_matches(candidate, model, normalized_model):
+    if _contains_pricing_key(model, candidate) \
+            or _contains_pricing_key(candidate, model):
+        return True
+    normalized_candidate = _normalized_key(candidate)
+    return _contains_pricing_key(normalized_model, normalized_candidate) \
+        or _contains_pricing_key(normalized_candidate, normalized_model)
+
+
+class PricingMap:
+    def __init__(self, raw):
+        self.entries = {}
+        for model, spec in raw.items():
+            if not isinstance(spec, dict):
+                continue
+            try:
+                entry = self._parse(model, spec)
+            except (TypeError, ValueError):  # wrong-typed field: skip, like serde
+                continue
+            if entry is not None:
+                self.entries[model] = entry
+        # ccusage overlays its builtin OpenAI long-context rates unless the
+        # source already carries any above-200k field (all-or-nothing).
+        for model, entry in self.entries.items():
+            builtin = BUILTIN_LONG_CONTEXT.get(strip_date_suffix(model))
+            if builtin and all(entry[k] is None for k in (
+                    "input_above", "output_above",
+                    "cache_create_above", "cache_read_above")):
+                entry["input_above"], entry["output_above"], \
+                    entry["cache_create_above"], entry["cache_read_above"] = builtin
+                entry["long_context_threshold"] = OPENAI_LONG_CONTEXT_THRESHOLD
+        self._cache = {}
+
+    @staticmethod
+    def _parse(model, spec):
+        def cost(key):
+            value = spec.get(key)
+            if value is None:
+                return None
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                return float(value)
+            raise ValueError(key)
+
+        inp, out = cost("input_cost_per_token"), cost("output_cost_per_token")
+        if inp is None or out is None:
+            return None
+        cache_read = cost("cache_read_input_token_cost")
+        pse = spec.get("provider_specific_entry")
+        fast = pse.get("fast") if isinstance(pse, dict) else None
+        if not isinstance(fast, (int, float)) or isinstance(fast, bool):
+            fast = fast_multiplier_override(model)
+        return {
+            "input": inp,
+            "output": out,
+            "cache_create": cost("cache_creation_input_token_cost")
+                if spec.get("cache_creation_input_token_cost") is not None
+                else inp * 1.25,
+            "cache_read": cache_read if cache_read is not None else inp * 0.1,
+            "cache_read_explicit": cache_read is not None,
+            "input_above": cost("input_cost_per_token_above_200k_tokens"),
+            "output_above": cost("output_cost_per_token_above_200k_tokens"),
+            "cache_create_above":
+                cost("cache_creation_input_token_cost_above_200k_tokens"),
+            "cache_read_above":
+                cost("cache_read_input_token_cost_above_200k_tokens"),
+            "long_context_threshold": None,
+            "fast_multiplier": float(fast) if isinstance(fast, (int, float))
+                and not isinstance(fast, bool) else 1.0,
+        }
+
+    def find(self, model):
+        if model in self._cache:
+            return self._cache[model]
+        found = self.entries.get(model)
+        if found is None:
+            normalized = _normalized_key(model)
+            matches = [key for key in self.entries
+                       if _pricing_key_matches(key, model, normalized)]
+            if matches:
+                # longest key wins; ties go to the lexicographically smallest
+                found = self.entries[sorted(matches, key=lambda k: (-len(k), k))[0]]
+        self._cache[model] = found
+        return found
+
+
+def tiered(tokens, base, above):
+    if above is not None and tokens > DEFAULT_LONG_CONTEXT_THRESHOLD:
+        return (DEFAULT_LONG_CONTEXT_THRESHOLD * base
+                + (tokens - DEFAULT_LONG_CONTEXT_THRESHOLD) * above)
+    return tokens * base
+
+
+def cache_write_tokens(usage):
+    breakdown = usage.get("cache_creation")
+    if isinstance(breakdown, dict):
+        return (_num(breakdown.get("ephemeral_5m_input_tokens")),
+                _num(breakdown.get("ephemeral_1h_input_tokens")))
+    return _num(usage.get("cache_creation_input_tokens")), 0
+
+
+def claude_cost(usage, p):
+    inp = _num(usage.get("input_tokens"))
+    out = _num(usage.get("output_tokens"))
+    creads = _num(usage.get("cache_read_input_tokens"))
+    cw5, cw1 = cache_write_tokens(usage)
+    cw1_rate = p["input"] * CACHE_CREATE_1H_INPUT_MULTIPLIER
+    cw1_above = (p["input_above"] * CACHE_CREATE_1H_INPUT_MULTIPLIER
+                 if p["input_above"] is not None else None)
+    threshold = p["long_context_threshold"]
+    if threshold is not None:
+        # OpenAI two-stage pricing: the whole request switches tiers.
+        long = inp > threshold
+        rate = (lambda base, above: above if long and above is not None else base)
+        cost = (inp * rate(p["input"], p["input_above"])
+                + out * rate(p["output"], p["output_above"])
+                + cw5 * rate(p["cache_create"], p["cache_create_above"])
+                + cw1 * rate(cw1_rate, cw1_above)
+                + creads * rate(p["cache_read"], p["cache_read_above"]))
+    else:
+        cost = (tiered(inp, p["input"], p["input_above"])
+                + tiered(out, p["output"], p["output_above"])
+                + tiered(cw5, p["cache_create"], p["cache_create_above"])
+                + tiered(cw1, cw1_rate, cw1_above)
+                + tiered(creads, p["cache_read"], p["cache_read_above"]))
+    if usage.get("speed") == "fast":
+        cost *= p["fast_multiplier"]
+    return cost
+
+
+# --- Claude Code transcripts -----------------------------------------------
+
+def has_unsupported_null(line):
+    """Port of ccusage's raw-byte scan for "<field>":null on a usage line."""
+    offset = 0
+    while (i := line.find(b":null", offset)) != -1:
+        j = i - 1
+        while j >= 0 and line[j:j + 1] != b'"':
+            j -= 1
+        opening = line.rfind(b'"', 0, j)
+        if opening != -1 and line[opening + 1:j] in UNSUPPORTED_NULL_FIELDS:
+            return True
+        offset = i + 5
+    return False
+
+
+def is_valid_entry(data, message):
+    # Present-and-bad rejects; absent fields are fine (adapter/claude/daily.rs).
+    version = data.get("version")
+    if version is not None and (not isinstance(version, str)
+                                or not re.match(r"\d+\.\d+\.\d", version)):
+        return False
+    for value in (data.get("sessionId"), data.get("requestId"),
+                  message.get("id"), message.get("model")):
+        if value == "":
+            return False
+    return True
+
+
+def token_total(usage):
+    cw5, cw1 = cache_write_tokens(usage)
+    return (_num(usage.get("input_tokens")) + _num(usage.get("output_tokens"))
+            + cw5 + cw1 + _num(usage.get("cache_read_input_tokens")))
+
+
+def should_replace(candidate, existing):
+    # ccusage's dedupe winner: non-sidechain, then token total, then cost,
+    # then presence of a speed field.
+    if candidate["sidechain"] != existing["sidechain"]:
+        return existing["sidechain"]
+    ct, et = token_total(candidate["usage"]), token_total(existing["usage"])
+    if ct != et:
+        return ct > et
+    if candidate["cost"] != existing["cost"]:
+        return candidate["cost"] > existing["cost"]
+    return (candidate["usage"].get("speed") is not None
+            and existing["usage"].get("speed") is None)
+
+
+def jsonl_files(root, min_mtime):
+    if not root.is_dir():
+        return
+    for path in root.rglob("*.jsonl"):
+        try:
+            if path.stat().st_mtime >= min_mtime:
+                yield path, path.read_bytes()
+        except OSError:
+            continue
+
+
+def claude_deduped_entries(pricing, min_mtime):
+    """Return deduped, costed usage entries from Claude Code transcripts.
+
+    A message streamed/replayed across several lines repeats its usage with
+    the same (message.id, requestId); sidechain logs can replay a parent
+    message under a new requestId. Like ccusage, keep the richest copy.
+    """
+    deduped = []
+    by_exact = {}   # (message_id, request_id) -> index
+    by_msg = {}     # message_id -> [indexes]
+    for root in CLAUDE_ROOTS:
+        for _path, blob in jsonl_files(root, min_mtime):
+            for line in blob.splitlines():
+                if b'"usage":{' not in line or has_unsupported_null(line):
+                    continue
+                try:
+                    data = json.loads(line)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    continue
+                if not isinstance(data, dict):
+                    continue
+                message = data.get("message")
+                if not isinstance(message, dict):
+                    continue
+                usage = message.get("usage")
+                model = message.get("model")
+                if not isinstance(usage, dict) or not model \
+                        or model == "<synthetic>" or not is_valid_entry(data, message):
+                    continue
+                cost_usd = data.get("costUSD")
+                if not isinstance(cost_usd, (int, float)) or isinstance(cost_usd, bool):
+                    p = pricing.find(model)
+                    cost_usd = claude_cost(usage, p) if p else 0.0
+                mid, rid = message.get("id"), data.get("requestId")
+                entry = {
+                    "usage": usage,
+                    "model": model,
+                    "cost": cost_usd,
+                    "timestamp": data.get("timestamp"),
+                    "sidechain": data.get("isSidechain") is True,
+                    "mid": mid,
+                    "rid": rid,
+                }
+                if not mid:
+                    deduped.append(entry)
+                    continue
+                idx = by_exact.get((mid, rid))
+                if idx is not None \
+                        and (deduped[idx]["mid"], deduped[idx]["rid"]) != (mid, rid):
+                    # A replacement changed the slot's requestId; like ccusage,
+                    # a stale index hit doesn't count as a duplicate.
+                    idx = None
+                if idx is None:
+                    for j in by_msg.get(mid, ()):
+                        if entry["sidechain"] or deduped[j]["sidechain"]:
+                            idx = j
+                            break
+                if idx is not None:
+                    if should_replace(entry, deduped[idx]):
+                        deduped[idx] = entry
+                    continue
+                by_exact[(mid, rid)] = len(deduped)
+                by_msg.setdefault(mid, []).append(len(deduped))
+                deduped.append(entry)
+    return deduped
+
+
+# --- Codex sessions ----------------------------------------------------------
+
+def codex_fast_tier():
+    """ccusage's line-based sniff of service_tier = "fast"|"priority"."""
+    for home in CODEX_HOMES:
+        try:
+            content = (home / "config.toml").read_text()
+        except OSError:
+            continue
+        for line in content.splitlines():
+            setting = line.split("#", 1)[0].strip()
+            key, sep, value = setting.partition("=")
+            if sep and key.strip() == "service_tier" \
+                    and value.strip().strip("\"'") in ("fast", "priority"):
+                return True
+    return False
+
+
+def codex_token_events(blob):
+    """Yield (kind, timestamp, payload) for token/turn lines in a rollout."""
+    for line in blob.splitlines():
+        if b'"token_count"' not in line and b'"turn_context"' not in line:
+            continue
+        try:
+            data = json.loads(line)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        payload = data.get("payload")
+        payload = payload if isinstance(payload, dict) else {}
+        if data.get("type") == "turn_context":
+            yield "turn_context", None, payload
+        elif data.get("type") == "event_msg" \
+                and payload.get("type") == "token_count":
+            yield "token_count", data.get("timestamp"), payload
+
+
+def _codex_info(payload):
+    info = payload.get("info")
+    return info if isinstance(info, dict) else {}
+
+
+def codex_replay_second(events):
+    """Replayed prefix marker: a forked session re-logs the original session's
+    token_count events in one burst, so its first two usage-carrying events
+    share the same timestamp-second. Returns that second, or None.
+    """
+    firsts = []
+    for kind, ts, payload in events:
+        if kind != "token_count" or not isinstance(ts, str) or len(ts) < 19:
+            continue
+        info = _codex_info(payload)
+        if info.get("last_token_usage") is None \
+                and info.get("total_token_usage") is None:
+            continue
+        firsts.append(ts[:19])
+        if len(firsts) == 2:
+            return firsts[0] if firsts[0] == firsts[1] else None
+    return None
+
+
+TOKEN_KEYS = ("input_tokens", "cached_input_tokens", "output_tokens",
+              "reasoning_output_tokens", "total_tokens")
+
+
+def codex_usage_events(min_mtime):
+    """Yield (model, timestamp, usage) from Codex rollouts, like ccusage:
+    per-turn deltas, replay prefixes skipped, duplicates dropped globally on
+    (timestamp, model, token counts) and per relative path across
+    sessions/ vs archived_sessions/.
+    """
+    seen_files = set()
+    seen_events = set()
+    for home in CODEX_HOMES:
+        for sub in ("sessions", "archived_sessions"):  # sessions/ wins
+            root = home / sub
+            for path, blob in jsonl_files(root, min_mtime):
+                if (str(home), path.relative_to(root)) in seen_files:
+                    continue
+                seen_files.add((str(home), path.relative_to(root)))
+                is_replay = (b"thread_spawn" in blob[:16384]
+                             or b"forked_from_id" in blob[:16384])
+                events = list(codex_token_events(blob))
+                skip_second = codex_replay_second(events) if is_replay else None
+                model = None
+                prev_total = None
+                for kind, timestamp, payload in events:
+                    if kind == "turn_context":
+                        model = payload.get("model") or model
+                        continue
+                    info = _codex_info(payload)
+                    total = info.get("total_token_usage")
+                    total = total if isinstance(total, dict) else None
+                    if skip_second is not None:
+                        if not isinstance(timestamp, str):
+                            continue  # keep the skip window, like ccusage
+                        if timestamp[:19] == skip_second:
+                            # Replayed history: track totals, don't count usage.
+                            if total is not None:
+                                prev_total = total
+                            continue
+                        skip_second = None
+                    raw = info.get("last_token_usage")
+                    raw = raw if isinstance(raw, dict) else None
+                    if raw is None and total is not None:
+                        prev = prev_total or {}
+                        raw = {k: max(0, _num(total.get(k)) - _num(prev.get(k)))
+                               for k in TOKEN_KEYS}
+                    if total is not None:
+                        prev_total = total
+                    if raw is None:
+                        continue
+                    usage = {k: _num(raw.get(k)) for k in TOKEN_KEYS}
+                    usage["cached_input_tokens"] = min(
+                        usage["cached_input_tokens"], usage["input_tokens"])
+                    if not any(usage[k] for k in TOKEN_KEYS[:4]):
+                        continue
+                    event_model = (payload.get("model") or info.get("model")
+                                   or model)
+                    if not event_model:
+                        continue
+                    key = (timestamp, event_model,
+                           *(usage[k] for k in TOKEN_KEYS))
+                    if key in seen_events:
+                        continue
+                    seen_events.add(key)
+                    yield event_model, timestamp, usage
+
+
+def codex_cost(usage, p, model, fast):
+    inp = usage["input_tokens"]          # includes cached tokens
+    cached = usage["cached_input_tokens"]
+    out = usage["output_tokens"]
+    cache_read = p["cache_read"] if p["cache_read_explicit"] else p["input"]
+    if inp > long_context_split_threshold(model):
+        # OpenAI bills the entire long-context request at long rates.
+        long_input = p["input_above"] if p["input_above"] is not None else p["input"]
+        long_output = p["output_above"] if p["output_above"] is not None else p["output"]
+        if p["cache_read_explicit"]:
+            long_cache_read = (p["cache_read_above"]
+                               if p["cache_read_above"] is not None else cache_read)
+        else:
+            long_cache_read = long_input
+        cost = ((inp - cached) * long_input + cached * long_cache_read
+                + out * long_output)
+    else:
+        cost = (inp - cached) * p["input"] + cached * cache_read + out * p["output"]
+    if fast:
+        cost *= p["fast_multiplier"] if p["fast_multiplier"] != 1.0 else 2.0
+    return cost
+
+
+# --- aggregation --------------------------------------------------------------
+
+def compute_day(day):
+    midnight = datetime.combine(day, datetime.min.time()).timestamp()
+    pricing = PricingMap(load_raw_pricing())
+    fast = codex_fast_tier()
+    totals = {label: 0.0 for label, _ in FAMILIES}
+
+    def add(model, cost):
+        model_lower = model.lower()
+        for label, substring in FAMILIES:
+            if substring in model_lower:
+                totals[label] += cost
+                break
+
+    # The day's entries only live in files written on/after the day, but a
+    # dedupe twin of a boundary-spanning message can sit in the previous
+    # day's file -- include it so the surviving copy matches ccusage.
+    for entry in claude_deduped_entries(pricing, midnight - 86400):
+        if local_date(entry["timestamp"]) == day:
+            add(entry["model"], entry["cost"])
+
+    for model, timestamp, usage in codex_usage_events(midnight):
+        if local_date(timestamp) != day:
+            continue
+        p = pricing.find(model)
+        if p:
+            add(model, codex_cost(usage, p, model, fast))
+
+    return totals
+
+
+def format_line(values):
+    return "  ".join(f"{label}: {values[label]}" for label, _ in FAMILIES)
+
+
+def refresh():
+    try:
+        totals = compute_day(datetime.now().date())
+        atomic_write(CACHE, format_line(
+            {label: f"${totals[label]:.3f}" for label, _ in FAMILIES}))
+    except Exception:
+        # Leave the last good value in place; drop a breadcrumb and retry
+        # on the next TTL tick.
+        try:
+            atomic_write(ERROR_LOG, traceback.format_exc())
+        except OSError:
+            pass
+        sys.exit(1)
+
+
+def main():
+    if "--refresh" in sys.argv[1:]:
+        refresh()
+        return
+    text = ""
+    stale = True
+    try:
+        stale = time.time() - CACHE.stat().st_mtime >= TTL
+        text = CACHE.read_text()
+    except OSError:
+        pass
+    if stale:
+        try:
+            # Touch first so concurrent redraws don't all spawn a refresh.
+            CACHE.touch()
+            subprocess.Popen(
+                [sys.executable, os.path.realpath(__file__), "--refresh"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except OSError:
+            pass
+    print(text if text else format_line(
+        {label: "$--" for label, _ in FAMILIES}), end="")
+
+
+if __name__ == "__main__":
+    main()
