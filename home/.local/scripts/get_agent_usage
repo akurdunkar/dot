@@ -43,14 +43,14 @@ from datetime import datetime
 from pathlib import Path
 
 UID = os.getuid()
-CACHE = Path(tempfile.gettempdir()) / f"ccusage-today-{UID}.txt"
-ERROR_LOG = Path(tempfile.gettempdir()) / f"ccusage-refresh-error-{UID}.txt"
+CACHE = Path(tempfile.gettempdir()) / f"agent-usage-today-{UID}.txt"
+ERROR_LOG = Path(tempfile.gettempdir()) / f"agent-usage-refresh-error-{UID}.txt"
 TTL = 15  # seconds
 
 PRICING_URL = ("https://raw.githubusercontent.com/BerriAI/litellm/main/"
                "model_prices_and_context_window.json")
 XDG_CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
-PRICING_CACHE = XDG_CACHE / "get_ccusage_pricing.json"
+PRICING_CACHE = XDG_CACHE / "get_agent_usage_pricing.json"
 PRICING_TTL = 24 * 3600
 PRICING_RETRY = 3600  # refetch cadence while the network is failing
 
