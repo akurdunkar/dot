@@ -5,5 +5,11 @@ mkdir -p "$dir"
 
 filepath="$dir/$(date '+%Y-%m-%d_%H-%M-%S').png"
 
-maim "$@" | tee "$filepath" | xclip -selection clipboard -t image/png &&
+maim "$@" > "$filepath" && [ -s "$filepath" ] || { rm -f "$filepath"; exit 1; }
+
+# Offer both the image and its path on the clipboard via the session's copyq
+# server (autostarted by dwm): image consumers paste the image, text fields
+# paste the path.
+SCREENSHOT_PATH="$filepath" copyq eval \
+	'copy("text/plain", str(env("SCREENSHOT_PATH")), "image/png", input())' < "$filepath" &&
 	notify-send -t 700 -i "$HOME/.local/assets/screenshot_icon.png" "Screenshot captured" "$filepath"
