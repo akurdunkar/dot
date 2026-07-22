@@ -26,6 +26,16 @@ class DisplayBackend(abc.ABC):
     async def verify(self, changes: list[tuple[str, OutputConfig]]) -> bool:
         """Re-read state and confirm the changes are in effect."""
 
+    async def cleanup_stale(self) -> list[str]:
+        """Turn off ghost outputs (disconnected but still driven by a CRTC).
+
+        A ghost CRTC can keep a Type-C PHY occupied, which blocks the PD
+        firmware from renegotiating DisplayPort alt mode when the monitor is
+        replugged -- so ghosts must be cleaned even when no profile apply is
+        pending.  Returns the connector names that were turned off.
+        """
+        return []
+
     @abc.abstractmethod
     def session_type(self) -> str:
         """Human-readable session identifier (e.g. 'x11', 'gnome-wayland')."""

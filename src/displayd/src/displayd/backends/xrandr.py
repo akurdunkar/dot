@@ -155,6 +155,9 @@ def _parse_xrandr_verbose(
 
 
 class XrandrBackend(DisplayBackend):
+    def __init__(self) -> None:
+        self._stale_outputs: list[str] = []
+
     def session_type(self) -> str:
         return "x11"
 
@@ -167,33 +170,27 @@ class XrandrBackend(DisplayBackend):
         args = _build_apply_args(changes)
 
         # Turn off disconnected outputs that still hold a CRTC (ghost outputs)
-        for stale_name in getattr(self, "_stale_outputs", []):
+        for stale_name in self._stale_outputs:
             if not any(c == stale_name for c, _ in changes):
                 log.info("Cleaning up stale disconnected output %s", stale_name)
                 args.extend(["--output", stale_name, "--off"])
 
         if not args:
             return True
-        log.info("xrandr %s", " ".join(args))
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "xrandr",
-                *args,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            _, stderr = await proc.communicate()
-            if proc.returncode != 0:
-                log.error(
-                    "xrandr failed (rc=%d): %s",
-                    proc.returncode,
-                    stderr.decode(errors="replace"),
-                )
-                return False
-            return True
-        except FileNotFoundError:
-            log.error("xrandr binary not found")
-            return False
+        return await _run_apply(args)
+
+    async def cleanup_stale(self) -> list[str]:
+        stale = list(self._stale_outputs)
+        if not stale:
+            return []
+        args: list[str] = []
+        for name in stale:
+            args.extend(["--output", name, "--off"])
+        log.info("Turning off stale disconnected output(s): %s", ", ".join(stale))
+        if not await _run_apply(args):
+            return []
+        self._stale_outputs = []
+        return stale
 
     async def verify(self, changes: list[tuple[str, OutputConfig]]) -> bool:
         topology = await self.get_topology()
@@ -263,6 +260,29 @@ def _build_apply_args(changes: list[tuple[str, OutputConfig]]) -> list[str]:
         if cfg.scale != 1.0:
             args.extend(["--scale", f"{cfg.scale}x{cfg.scale}"])
     return args
+
+
+async def _run_apply(args: list[str]) -> bool:
+    log.info("xrandr %s", " ".join(args))
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "xrandr",
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            log.error(
+                "xrandr failed (rc=%d): %s",
+                proc.returncode,
+                stderr.decode(errors="replace"),
+            )
+            return False
+        return True
+    except FileNotFoundError:
+        log.error("xrandr binary not found")
+        return False
 
 
 async def _run(*args: str) -> str:

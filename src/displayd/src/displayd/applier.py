@@ -100,6 +100,29 @@ class DisplayApplier:
                     await asyncio.sleep(self._retry_delay)
                 continue
 
+            # Ghost outputs never appear in the topology (or its hashes), so
+            # clean them before the unchanged-state short-circuit and even
+            # when no profile ends up matching.
+            try:
+                cleaned = await self._backend.cleanup_stale()
+            except Exception:
+                log.exception("Stale output cleanup failed")
+                cleaned = []
+            if cleaned:
+                log.info("Cleaned stale output(s): %s", ", ".join(cleaned))
+                try:
+                    topology = await self._backend.get_topology()
+                except Exception:
+                    log.exception(
+                        "Topology re-read after stale cleanup failed "
+                        "(attempt %d/%d)",
+                        attempt,
+                        self._max_retries,
+                    )
+                    if attempt < self._max_retries:
+                        await asyncio.sleep(self._retry_delay)
+                    continue
+
             if not force and topology.full_state_hash == self._last_applied_hash:
                 log.debug("Topology unchanged since last apply")
                 return True

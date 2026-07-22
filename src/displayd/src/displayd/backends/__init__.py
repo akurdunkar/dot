@@ -40,6 +40,9 @@ class LidAwareBackend(DisplayBackend):
     async def verify(self, changes: list[tuple[str, OutputConfig]]) -> bool:
         return await self._inner.verify(changes)
 
+    async def cleanup_stale(self) -> list[str]:
+        return await self._inner.cleanup_stale()
+
     def session_type(self) -> str:
         return self._inner.session_type()
 
