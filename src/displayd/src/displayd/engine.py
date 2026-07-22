@@ -271,7 +271,25 @@ class Engine:
         matched: Optional[str] = None
         in_sync = False
         if topology is not None:
-            profile = match_profile(topology, profiles)
+            # Prefer the profile the daemon last put on screen (tray switch,
+            # snapshot, or auto-apply) over a pure priority match, so that
+            # switching between profiles for the same monitor set is
+            # reflected in the UI. Fall back to matching when the record is
+            # stale (profile deleted or monitor set changed).
+            profile: Optional[Profile] = None
+            active = self._applier.last_profile
+            if active is not None:
+                profile = next(
+                    (
+                        p
+                        for p in profiles
+                        if p.name == active
+                        and p.topology_hash == topology.identity_hash
+                    ),
+                    None,
+                )
+            if profile is None:
+                profile = match_profile(topology, profiles)
             if profile is not None:
                 matched = profile.name
                 in_sync = plan_reconciliation(topology, profile).is_noop
@@ -365,9 +383,10 @@ class Engine:
             )
         plan = plan_reconciliation(topology, profile)
         if plan.is_noop:
+            await self._applier.mark_profile(name)
             await self._refresh_state()
             return True
-        ok = await self._applier.apply_manual(plan.changes)
+        ok = await self._applier.apply_manual(plan.changes, profile_name=name)
         await self._refresh_state()
         return ok
 
@@ -392,6 +411,9 @@ class Engine:
         topology = await self._backend.get_topology()
         profile = snapshot_to_profile(name, topology, priority=priority)
         path = save_profile(profile, self._profile_dir)
+        # The snapshot captures what is on screen right now, so it is by
+        # construction the profile in effect.
+        await self._applier.mark_profile(name)
         await self._reload_profiles()
         return path
 
@@ -403,4 +425,7 @@ class Engine:
             log.info("Deleted profile %r (%s)", name, path)
         else:
             log.warning("Profile file for %r not found at %s", name, path)
+        # Drop the in-effect record so a later profile reusing this name is
+        # not presented as already established on screen.
+        await self._applier.clear_profile(name)
         await self._reload_profiles()

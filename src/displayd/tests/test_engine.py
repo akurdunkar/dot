@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
 from typing import Callable
@@ -53,6 +54,7 @@ class FakeBackend(DisplayBackend):
         self.apply_calls: list[list[tuple[str, OutputConfig]]] = []
         self.apply_result = True
         self.verify_result = True
+        self.verify_delay = 0.0
 
     async def get_topology(self) -> Topology:
         return self.topology
@@ -82,6 +84,8 @@ class FakeBackend(DisplayBackend):
         return True
 
     async def verify(self, changes: list[tuple[str, OutputConfig]]) -> bool:
+        if self.verify_delay:
+            await asyncio.sleep(self.verify_delay)
         return self.verify_result
 
     def session_type(self) -> str:
@@ -222,6 +226,156 @@ class TestCooldown:
             # "Sync now" is an explicit user request and must still override.
             assert engine.sync_now().result(timeout=5) is True
             assert backend.topology.outputs[0].current_mode == "3840x2160"
+        finally:
+            engine.stop()
+
+
+def save_variant(
+    profile_dir: Path,
+    name: str,
+    priority: int = 0,
+    mode: str = "3840x2160",
+    primary: bool = False,
+) -> Profile:
+    profile = Profile(
+        name=name,
+        topology_hash=BASE_TOPOLOGY.identity_hash,
+        outputs=(
+            OutputConfig(
+                identity=IDENTITY,
+                enabled=True,
+                mode=mode,
+                position=(0, 0),
+                rotation="normal",
+                primary=primary,
+            ),
+        ),
+        priority=priority,
+    )
+    save_profile(profile, profile_dir)
+    return profile
+
+
+class TestApplyProfile:
+    def test_apply_profile_moves_matched_profile(self, tmp_path):
+        """Switching profiles from the tray must move matched_profile to the
+        applied profile, not leave it on the highest-priority sibling."""
+        save_variant(tmp_path, "alt", priority=0, primary=False)
+        write_profile(tmp_path, "docked", priority=10)
+
+        backend = FakeBackend(BASE_TOPOLOGY)
+        engine = make_engine(tmp_path, backend)
+        engine.start()
+        try:
+            assert wait_for(lambda: engine.state.matched_profile == "docked")
+            assert wait_for(lambda: engine.state.in_sync)
+
+            assert engine.apply_profile("alt").result(timeout=5) is True
+            assert engine.state.matched_profile == "alt"
+            assert engine.state.in_sync
+
+            # A later event must not silently revert the manual choice.
+            engine.inject_event(
+                DisplayEvent(kind=EventKind.SESSION_UNLOCK, detail="test")
+            )
+            time.sleep(0.5)
+            assert engine.state.matched_profile == "alt"
+            assert backend.topology.outputs[0].is_primary is False
+        finally:
+            engine.stop()
+
+    def test_apply_profile_already_in_effect_moves_marker(self, tmp_path):
+        """Clicking a profile whose layout is already on screen (no-op plan)
+        must still mark it as the matched profile."""
+        # "twin" is configured identically to "docked" but at lower priority.
+        save_variant(tmp_path, "twin", priority=0, primary=True)
+        write_profile(tmp_path, "docked", priority=10)
+
+        backend = FakeBackend(BASE_TOPOLOGY)
+        engine = make_engine(tmp_path, backend)
+        engine.start()
+        try:
+            assert wait_for(lambda: engine.state.matched_profile == "docked")
+            assert wait_for(lambda: engine.state.in_sync)
+
+            assert engine.apply_profile("twin").result(timeout=5) is True
+            assert engine.state.matched_profile == "twin"
+            assert engine.state.in_sync
+        finally:
+            engine.stop()
+
+    def test_startup_applies_priority_winner_over_coincidental_state(
+        self, tmp_path
+    ):
+        """A boot layout that happens to equal a low-priority profile must not
+        stop startup reconciliation from applying the priority winner."""
+        # "boot" equals BASE_TOPOLOGY's initial state exactly.
+        save_variant(tmp_path, "boot", priority=0, mode="1920x1080")
+        write_profile(tmp_path, "docked", priority=10)
+
+        backend = FakeBackend(BASE_TOPOLOGY)
+        engine = make_engine(tmp_path, backend)
+        engine.start()
+        try:
+            assert wait_for(lambda: len(backend.apply_calls) >= 1)
+            assert wait_for(lambda: engine.state.matched_profile == "docked")
+            assert wait_for(lambda: engine.state.in_sync)
+            assert backend.topology.outputs[0].current_mode == "3840x2160"
+        finally:
+            engine.stop()
+
+    def test_noop_apply_during_inflight_reconcile_keeps_choice(self, tmp_path):
+        """A no-op tray click racing a reconcile stuck in verification must
+        not have its marker overwritten when the reconcile completes."""
+        save_variant(tmp_path, "twin", priority=0, primary=True)
+        write_profile(tmp_path, "docked", priority=10)
+
+        backend = FakeBackend(BASE_TOPOLOGY)
+        backend.verify_delay = 0.5
+        engine = make_engine(tmp_path, backend)
+        engine.start()
+        try:
+            # Startup reconcile has applied "docked" and is now sleeping in
+            # verification, holding the applier lock.
+            assert wait_for(lambda: len(backend.apply_calls) >= 1)
+            fut = engine.apply_profile("twin")
+            assert fut.result(timeout=5) is True
+            assert wait_for(lambda: engine.state.matched_profile == "twin")
+        finally:
+            engine.stop()
+
+    def test_deleted_profile_name_reuse_does_not_resurrect_marker(
+        self, tmp_path
+    ):
+        """Deleting the recorded profile then reusing its name for a layout
+        that was never applied must not mark the new profile as in effect."""
+        save_variant(tmp_path, "alt", priority=0, primary=False)
+        write_profile(tmp_path, "docked", priority=10)
+
+        backend = FakeBackend(BASE_TOPOLOGY)
+        engine = make_engine(tmp_path, backend)
+        engine.start()
+        try:
+            assert wait_for(lambda: engine.state.matched_profile == "docked")
+            assert engine.apply_profile("alt").result(timeout=5) is True
+            assert engine.state.matched_profile == "alt"
+
+            engine.delete_profile("alt").result(timeout=5)
+            assert engine.state.matched_profile == "docked"
+
+            # Recreate the name with a layout that is NOT on screen.
+            never_applied = OutputConfig(
+                identity=IDENTITY,
+                enabled=True,
+                mode="3840x2160",
+                position=(0, 0),
+                rotation="left",
+                primary=False,
+            )
+            engine.save_layout(
+                "alt", [never_applied], BASE_TOPOLOGY.identity_hash
+            ).result(timeout=5)
+            assert engine.state.matched_profile == "docked"
         finally:
             engine.stop()
 

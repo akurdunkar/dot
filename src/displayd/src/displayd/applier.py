@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
+from typing import Optional
 
 from .backends.base import DisplayBackend
 from .cooldown import CooldownTracker
@@ -69,6 +70,11 @@ class DisplayApplier:
         self._verify_delay = verify_delay
         self._cooldown = CooldownTracker(cooldown_seconds)
         self._last_applied_hash: str = ""
+        #: Name of the profile most recently established on screen (by a
+        #: reconcile or a profile-driven manual apply); None when the current
+        #: layout is not known to correspond to any profile. Only touched on
+        #: the engine loop thread.
+        self.last_profile: Optional[str] = None
 
     async def reconcile(self, *, force: bool = False) -> bool:
         """Run a full read-match-apply-verify cycle (serialized)."""
@@ -101,11 +107,13 @@ class DisplayApplier:
             profile = match_profile(topology, self._profiles)
             if profile is None:
                 log.info("No matching profile; nothing to apply")
+                self.last_profile = None
                 return False
 
             plan = plan_reconciliation(topology, profile)
             if plan.is_noop:
                 self._last_applied_hash = topology.full_state_hash
+                self.last_profile = profile.name
                 return True
 
             log.info(
@@ -155,6 +163,7 @@ class DisplayApplier:
                 new_topo = await self._backend.get_topology()
                 self._last_applied_hash = new_topo.full_state_hash
                 self._cooldown.record_auto_apply()
+                self.last_profile = profile.name
                 log.info("Profile %r applied and verified", profile.name)
                 await _notify(
                     f"Display: {profile.name}",
@@ -179,11 +188,17 @@ class DisplayApplier:
         )
         return False
 
-    async def apply_manual(self, changes: list[tuple[str, OutputConfig]]) -> bool:
+    async def apply_manual(
+        self,
+        changes: list[tuple[str, OutputConfig]],
+        profile_name: Optional[str] = None,
+    ) -> bool:
         """Apply a user-supplied layout (serialized), bypassing profile matching.
 
         Always records a manual change so auto-apply backs off, even when the
-        apply itself fails.
+        apply itself fails. When the layout corresponds to a saved profile,
+        pass its name via profile_name so it is recorded as the profile in
+        effect; ad-hoc layouts (profile_name=None) clear that record.
         """
         async with self._lock:
             try:
@@ -212,6 +227,7 @@ class DisplayApplier:
 
                 if not verified:
                     log.warning("Manual apply verification mismatch")
+                    self.last_profile = None
                     await _notify(
                         "Display: manual apply failed",
                         "Applied layout did not verify",
@@ -221,6 +237,7 @@ class DisplayApplier:
 
                 new_topo = await self._backend.get_topology()
                 self._last_applied_hash = new_topo.full_state_hash
+                self.last_profile = profile_name
                 log.info("Manual layout applied and verified")
                 await _notify(
                     "Display: manual layout applied",
@@ -229,6 +246,21 @@ class DisplayApplier:
                 return True
             finally:
                 self._cooldown.record_manual_change()
+
+    async def mark_profile(self, profile_name: Optional[str]) -> None:
+        """Record profile_name as the profile in effect without applying.
+
+        Serialized behind the apply lock so an in-flight reconcile or manual
+        apply cannot overwrite the record afterwards.
+        """
+        async with self._lock:
+            self.last_profile = profile_name
+
+    async def clear_profile(self, profile_name: str) -> None:
+        """Forget the in-effect record if it names the given profile."""
+        async with self._lock:
+            if self.last_profile == profile_name:
+                self.last_profile = None
 
     def reload_profiles(self, profiles: list[Profile]) -> None:
         self._profiles = profiles
