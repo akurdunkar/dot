@@ -229,6 +229,14 @@ class XrandrBackend(DisplayBackend):
                         desired.position,
                     )
                     return False
+                if output.current_rotation != desired.rotation:
+                    log.warning(
+                        "Verify: %s rotation %s != desired %s",
+                        connector,
+                        output.current_rotation,
+                        desired.rotation,
+                    )
+                    return False
         return True
 
 
@@ -247,8 +255,9 @@ def _build_apply_args(changes: list[tuple[str, OutputConfig]]) -> list[str]:
         if cfg.mode:
             args.extend(["--mode", cfg.mode])
         args.extend(["--pos", f"{cfg.position[0]}x{cfg.position[1]}"])
-        if cfg.rotation != "normal":
-            args.extend(["--rotate", cfg.rotation])
+        # Always pass --rotate: omitting it would leave a previously rotated
+        # output rotated when the desired rotation is "normal".
+        args.extend(["--rotate", cfg.rotation])
         if cfg.primary:
             args.append("--primary")
         if cfg.scale != 1.0:

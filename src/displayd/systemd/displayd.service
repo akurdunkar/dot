@@ -1,0 +1,20 @@
+# displayd user unit. startx/dwm users without a managed
+# graphical-session.target should prefer the autostart.sh line instead.
+# For this unit to work, DISPLAY must be imported into the user manager:
+#   systemctl --user import-environment DISPLAY
+# "make install" rewrites ExecStart to the actual installed binary path
+# (non-root pip installs land in ~/.local/bin, not /usr/local/bin).
+
+[Unit]
+Description=displayd display management daemon
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/displayd
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import logging
 import os
 import sys
 from pathlib import Path
 
-from .agent.applier import DisplayApplier
-from .backends import detect_backend
+from .applier import DisplayApplier
+from .backends import LidAwareBackend, detect_backend
 from .log import setup_logging
 from .policy import (
     load_profiles,
@@ -30,7 +29,7 @@ DEFAULT_PROFILE_DIR = Path(
 
 
 async def _cmd_show(args: argparse.Namespace) -> None:
-    backend = detect_backend()
+    backend = LidAwareBackend(detect_backend())
     topo = await backend.get_topology()
     print(f"Topology identity hash: {topo.identity_hash}")
     print(f"Full state hash:        {topo.full_state_hash}")
@@ -55,7 +54,7 @@ async def _cmd_show(args: argparse.Namespace) -> None:
 
 
 async def _cmd_save(args: argparse.Namespace) -> None:
-    backend = detect_backend()
+    backend = LidAwareBackend(detect_backend())
     topo = await backend.get_topology()
     if topo.monitor_count == 0:
         sys.exit("No connected outputs detected")
@@ -88,7 +87,7 @@ def _cmd_list(args: argparse.Namespace) -> None:
 
 
 async def _cmd_status(args: argparse.Namespace) -> None:
-    backend = detect_backend()
+    backend = LidAwareBackend(detect_backend())
     topo = await backend.get_topology()
     profiles = load_profiles(args.profile_dir)
 
@@ -126,7 +125,7 @@ async def _cmd_status(args: argparse.Namespace) -> None:
 
 
 async def _cmd_sync(args: argparse.Namespace) -> None:
-    backend = detect_backend()
+    backend = LidAwareBackend(detect_backend())
     profiles = load_profiles(args.profile_dir)
     if not profiles:
         sys.exit(f"No profiles in {args.profile_dir}")

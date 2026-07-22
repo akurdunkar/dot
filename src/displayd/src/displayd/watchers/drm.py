@@ -19,7 +19,21 @@ _ACTION_MAP: dict[str | None, EventKind] = {
 
 
 async def watch_drm(queue: asyncio.Queue[DisplayEvent]) -> None:
-    """Poll udev for DRM subsystem events and enqueue them."""
+    """Poll udev for DRM subsystem events and enqueue them.
+
+    Restarts the udev monitor after errors (e.g. netlink overruns during
+    dock/resume event storms) instead of dying silently."""
+    while True:
+        try:
+            await _watch_once(queue)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("DRM udev watcher error; restarting in 5 s")
+        await asyncio.sleep(5)
+
+
+async def _watch_once(queue: asyncio.Queue[DisplayEvent]) -> None:
     context = pyudev.Context()
     monitor = pyudev.Monitor.from_netlink(context)
     monitor.filter_by(subsystem="drm")

@@ -6,10 +6,10 @@ import asyncio
 import logging
 import shutil
 
-from ..backends.base import DisplayBackend
-from ..policy import match_profile, plan_reconciliation
-from ..types import OutputConfig, Profile, ReconciliationPlan
+from .backends.base import DisplayBackend
 from .cooldown import CooldownTracker
+from .policy import match_profile, plan_reconciliation
+from .types import OutputConfig, Profile, ReconciliationPlan
 
 log = logging.getLogger(__name__)
 
@@ -80,6 +80,7 @@ class DisplayApplier:
             log.info("Skipping auto-apply: user-override cooldown active")
             return False
 
+        profile: Profile | None = None
         for attempt in range(1, self._max_retries + 1):
             try:
                 topology = await self._backend.get_topology()
@@ -170,12 +171,64 @@ class DisplayApplier:
                 await asyncio.sleep(self._retry_delay)
 
         log.error("All %d apply attempts exhausted", self._max_retries)
+        name = profile.name if profile is not None else "(unknown)"
         await _notify(
             "Display: apply failed",
-            f"Could not apply profile '{profile.name}' after {self._max_retries} attempts",
+            f"Could not apply profile '{name}' after {self._max_retries} attempts",
             urgency="critical",
         )
         return False
+
+    async def apply_manual(self, changes: list[tuple[str, OutputConfig]]) -> bool:
+        """Apply a user-supplied layout (serialized), bypassing profile matching.
+
+        Always records a manual change so auto-apply backs off, even when the
+        apply itself fails.
+        """
+        async with self._lock:
+            try:
+                ok = False
+                try:
+                    ok = await self._backend.apply(changes)
+                except Exception:
+                    log.exception("Manual apply raised")
+
+                if not ok:
+                    log.warning("Manual apply failed")
+                    await _notify(
+                        "Display: manual apply failed",
+                        f"Backend rejected {len(changes)} change(s)",
+                        urgency="critical",
+                    )
+                    return False
+
+                await asyncio.sleep(self._verify_delay)
+
+                try:
+                    verified = await self._backend.verify(changes)
+                except Exception:
+                    log.exception("Manual apply verification raised")
+                    verified = False
+
+                if not verified:
+                    log.warning("Manual apply verification mismatch")
+                    await _notify(
+                        "Display: manual apply failed",
+                        "Applied layout did not verify",
+                        urgency="critical",
+                    )
+                    return False
+
+                new_topo = await self._backend.get_topology()
+                self._last_applied_hash = new_topo.full_state_hash
+                log.info("Manual layout applied and verified")
+                await _notify(
+                    "Display: manual layout applied",
+                    f"{len(changes)} change(s)",
+                )
+                return True
+            finally:
+                self._cooldown.record_manual_change()
 
     def reload_profiles(self, profiles: list[Profile]) -> None:
         self._profiles = profiles

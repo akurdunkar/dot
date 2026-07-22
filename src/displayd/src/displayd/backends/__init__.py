@@ -4,12 +4,44 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import Callable, Optional
 
+from ..topology import read_lid_state
+from ..types import OutputConfig, Topology
 from .base import DisplayBackend
 
 log = logging.getLogger(__name__)
 
-__all__ = ["DisplayBackend", "detect_backend"]
+__all__ = ["DisplayBackend", "LidAwareBackend", "detect_backend"]
+
+
+class LidAwareBackend(DisplayBackend):
+    """Delegates to a real backend, stamping the current lid state onto every
+    topology so closed-lid setups hash as a distinct topology.
+
+    Every component that computes topology hashes (daemon, editor, ctl) must
+    go through this wrapper so saved profiles and live matching agree."""
+
+    def __init__(
+        self,
+        inner: DisplayBackend,
+        lid_state: Optional[Callable[[], bool]] = None,
+    ) -> None:
+        self._inner = inner
+        self._lid_state = lid_state if lid_state is not None else read_lid_state
+
+    async def get_topology(self) -> Topology:
+        topo = await self._inner.get_topology()
+        return Topology(outputs=topo.outputs, lid_closed=self._lid_state())
+
+    async def apply(self, changes: list[tuple[str, OutputConfig]]) -> bool:
+        return await self._inner.apply(changes)
+
+    async def verify(self, changes: list[tuple[str, OutputConfig]]) -> bool:
+        return await self._inner.verify(changes)
+
+    def session_type(self) -> str:
+        return self._inner.session_type()
 
 
 def detect_backend() -> DisplayBackend:
