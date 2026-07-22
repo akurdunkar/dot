@@ -17,17 +17,14 @@ import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import GLib, Gtk
 
+from . import icon as icon_mod
+
 if TYPE_CHECKING:
     from ..engine import Engine, EngineState
 
 log = logging.getLogger(__name__)
 
-
-def _pick_icon_name() -> str:
-    theme = Gtk.IconTheme.get_default()
-    if theme is not None and theme.has_icon("video-display"):
-        return "video-display"
-    return "display"
+_EMBED_CHECK_SECONDS = 5
 
 
 class TrayIcon:
@@ -37,15 +34,35 @@ class TrayIcon:
         self._engine = engine
         self._on_quit = on_quit
         self._menu: Optional[Gtk.Menu] = None
+        self._size = 22
+        self._last_state = engine.state
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             self._icon = Gtk.StatusIcon()
-            self._icon.set_from_icon_name(_pick_icon_name())
             self._icon.set_visible(True)
         self._icon.connect("activate", self._on_activate)
         self._icon.connect("popup-menu", self._on_popup_menu)
+        self._icon.connect("size-changed", self._on_size_changed)
         self._apply_state(engine.state)
         engine.add_state_listener(lambda s: GLib.idle_add(self._on_state, s))
+        GLib.timeout_add_seconds(_EMBED_CHECK_SECONDS, self._check_embedded)
+
+    def _check_embedded(self) -> bool:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            embedded = self._icon.is_embedded()
+        if not embedded:
+            log.warning(
+                "Tray icon is not embedded after %d s -- no XEmbed systray "
+                "manager found (dwm systray patch / trayer running?)",
+                _EMBED_CHECK_SECONDS,
+            )
+        return False
+
+    def _on_size_changed(self, _icon: Gtk.StatusIcon, size: int) -> bool:
+        self._size = size
+        self._update_icon()
+        return True
 
     # ------------------------------------------------------------------
     # State
@@ -56,6 +73,7 @@ class TrayIcon:
         return False
 
     def _apply_state(self, state: EngineState) -> None:
+        self._last_state = state
         tooltip = f"displayd — {state.matched_profile or 'no profile'}"
         if state.paused:
             tooltip += " (paused)"
@@ -66,6 +84,20 @@ class TrayIcon:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             self._icon.set_tooltip_text(tooltip)
+        self._update_icon()
+
+    def _update_icon(self) -> None:
+        state = self._last_state
+        if state.paused:
+            fill = icon_mod.FILL_PAUSED
+        elif state.in_sync:
+            fill = icon_mod.FILL_IN_SYNC
+        else:
+            fill = icon_mod.FILL_OUT_OF_SYNC
+        pixbuf = icon_mod.render_icon(self._size, fill)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            self._icon.set_from_pixbuf(pixbuf)
 
     # ------------------------------------------------------------------
     # Menu
