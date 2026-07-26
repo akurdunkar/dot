@@ -55,6 +55,11 @@ class FakeBackend(DisplayBackend):
         self.apply_result = True
         self.verify_result = True
         self.verify_delay = 0.0
+        self.cleanup_calls = 0
+
+    async def cleanup_stale(self) -> list[str]:
+        self.cleanup_calls += 1
+        return []
 
     async def get_topology(self) -> Topology:
         return self.topology
@@ -376,6 +381,175 @@ class TestApplyProfile:
                 "alt", [never_applied], BASE_TOPOLOGY.identity_hash
             ).result(timeout=5)
             assert engine.state.matched_profile == "docked"
+        finally:
+            engine.stop()
+
+
+class TestGuards:
+    def test_apply_profile_for_different_monitor_set_is_refused(self, tmp_path):
+        """A docked profile applied while undocked would --off the only
+        display; the engine must refuse the mismatched monitor set."""
+        write_profile(tmp_path, "docked")
+        foreign = Profile(
+            name="foreign",
+            topology_hash="0123456789abcdef",
+            outputs=(DESIRED,),
+        )
+        save_profile(foreign, tmp_path)
+        backend = FakeBackend(BASE_TOPOLOGY)
+        engine = make_engine(tmp_path, backend)
+        engine.start()
+        try:
+            assert wait_for(lambda: engine.state.topology is not None)
+            applies = len(backend.apply_calls)
+            with pytest.raises(ValueError, match="different monitor set"):
+                engine.apply_profile("foreign").result(timeout=5)
+            assert len(backend.apply_calls) == applies
+        finally:
+            engine.stop()
+
+    def test_save_layout_with_no_enabled_outputs_is_refused(self, tmp_path):
+        backend = FakeBackend(BASE_TOPOLOGY)
+        engine = make_engine(tmp_path, backend)
+        engine.start()
+        try:
+            assert wait_for(lambda: engine.state.topology is not None)
+            disabled = OutputConfig(identity=IDENTITY, enabled=False)
+            with pytest.raises(ValueError, match="no enabled outputs"):
+                engine.save_layout(
+                    "black", [disabled], BASE_TOPOLOGY.identity_hash
+                ).result(timeout=5)
+            assert not (tmp_path / "black.json").exists()
+        finally:
+            engine.stop()
+
+
+class TestProfileFreshness:
+    def test_out_of_band_profile_is_picked_up_on_next_event(self, tmp_path):
+        """Profiles written behind the engine's back (displayd-ctl, hand
+        edits) must be honored by the next reconcile without a restart."""
+        backend = FakeBackend(BASE_TOPOLOGY)
+        engine = make_engine(tmp_path, backend)
+        engine.start()
+        try:
+            assert wait_for(lambda: engine.state.topology is not None)
+            assert backend.apply_calls == []
+
+            write_profile(tmp_path, "docked")
+            engine.inject_event(
+                DisplayEvent(kind=EventKind.DRM_CHANGE, detail="test")
+            )
+            assert wait_for(lambda: len(backend.apply_calls) >= 1)
+            assert wait_for(lambda: engine.state.matched_profile == "docked")
+        finally:
+            engine.stop()
+
+
+class TestPausedHygiene:
+    def test_paused_event_still_cleans_ghosts(self, tmp_path):
+        """Ghost-output cleanup is hardware hygiene, not profile application;
+        it must keep running while auto-apply is paused."""
+        write_profile(tmp_path, "docked")
+        backend = FakeBackend(BASE_TOPOLOGY)
+        engine = make_engine(tmp_path, backend)
+        engine.start()
+        try:
+            assert wait_for(lambda: engine.state.in_sync)
+            engine.set_paused(True)
+            applies = len(backend.apply_calls)
+            cleanups = backend.cleanup_calls
+
+            engine.inject_event(
+                DisplayEvent(kind=EventKind.DRM_CHANGE, detail="test")
+            )
+            assert wait_for(lambda: backend.cleanup_calls > cleanups)
+            assert len(backend.apply_calls) == applies
+        finally:
+            engine.stop()
+
+    def test_unpause_reconciles_without_new_event(self, tmp_path):
+        """Events dropped while paused are gone; unpausing must catch up on
+        its own instead of waiting for the next unrelated event."""
+        write_profile(tmp_path, "docked")
+        backend = FakeBackend(BASE_TOPOLOGY)
+        engine = make_engine(tmp_path, backend)
+        engine.start()
+        try:
+            assert wait_for(lambda: engine.state.in_sync)
+            applies = len(backend.apply_calls)
+
+            engine.set_paused(True)
+            backend.topology = BASE_TOPOLOGY  # drift back while paused
+            engine.inject_event(
+                DisplayEvent(kind=EventKind.DRM_CHANGE, detail="test")
+            )
+            assert wait_for(lambda: not engine.state.in_sync)
+            assert len(backend.apply_calls) == applies
+
+            engine.set_paused(False)
+            assert wait_for(lambda: len(backend.apply_calls) > applies)
+            assert wait_for(
+                lambda: backend.topology.outputs[0].current_mode == "3840x2160"
+            )
+        finally:
+            engine.stop()
+
+
+class TestCooldownRetry:
+    def test_event_during_cooldown_reconciles_after_it_expires(self, tmp_path):
+        """A hardware change landing inside the cooldown window must not be
+        dropped forever: the engine retries once the cooldown ends."""
+        write_profile(tmp_path, "docked")
+        backend = FakeBackend(BASE_TOPOLOGY)
+        engine = Engine(
+            profile_dir=tmp_path,
+            cooldown=1.0,
+            retries=2,
+            debounce=0.05,
+            settle=0.05,
+            backend=backend,
+            enable_watchers=False,
+        )
+        engine.start()
+        try:
+            assert wait_for(lambda: engine.state.in_sync)
+            manual = OutputConfig(
+                identity=IDENTITY,
+                enabled=True,
+                mode="1920x1080",
+                position=(0, 0),
+                rotation="normal",
+                primary=False,
+            )
+            assert engine.apply_layout([("DP-1", manual)]).result(timeout=5)
+            applies = len(backend.apply_calls)
+
+            # Hardware changes while the cooldown is still running...
+            out = backend.topology.outputs[0]
+            backend.topology = Topology(
+                outputs=(
+                    ConnectedOutput(
+                        connector=out.connector,
+                        identity=out.identity,
+                        modes=out.modes,
+                        current_mode="1920x1080",
+                        current_position=(100, 100),
+                        current_rotation="normal",
+                        is_primary=False,
+                    ),
+                )
+            )
+            engine.inject_event(
+                DisplayEvent(kind=EventKind.DRM_CHANGE, detail="dock")
+            )
+            time.sleep(0.4)
+            # ...must not be applied inside the window...
+            assert len(backend.apply_calls) == applies
+            # ...but must reconcile after it expires, without another event.
+            assert wait_for(lambda: len(backend.apply_calls) > applies)
+            assert wait_for(
+                lambda: backend.topology.outputs[0].current_mode == "3840x2160"
+            )
         finally:
             engine.stop()
 

@@ -8,9 +8,12 @@ from pathlib import Path
 
 import pytest
 
+from dataclasses import replace
+
 from displayd.policy import (
     load_profiles,
     match_profile,
+    profile_matches_monitor_set,
     save_profile,
     snapshot_to_profile,
 )
@@ -97,6 +100,49 @@ class TestMatchProfile:
         topo = _topo(("DP-1", "DEL", "UW", "A", "3440x1440", (0, 0)))
         assert match_profile(topo, []) is None
 
+    def test_lid_state_distinguishes_topologies_for_auto_match(self):
+        open_topo = _topo(("DP-1", "DEL", "UW", "A", "3440x1440", (0, 0)))
+        closed_topo = replace(open_topo, lid_closed=True)
+        prof = _profile(
+            "open-lid",
+            open_topo,
+            [(MonitorIdentity("DEL", "UW", "A"), "3440x1440", (0, 0), True)],
+        )
+        assert match_profile(open_topo, [prof]) is prof
+        assert match_profile(closed_topo, [prof]) is None
+
+    def test_manual_match_ignores_lid_state(self):
+        """Explicitly switching to a same-monitor profile saved with the lid
+        in the other position must be allowed (clamshell users)."""
+        open_topo = _topo(("DP-1", "DEL", "UW", "A", "3440x1440", (0, 0)))
+        closed_topo = replace(open_topo, lid_closed=True)
+        prof = _profile(
+            "open-lid",
+            open_topo,
+            [(MonitorIdentity("DEL", "UW", "A"), "3440x1440", (0, 0), True)],
+        )
+        assert profile_matches_monitor_set(prof, open_topo)
+        assert profile_matches_monitor_set(prof, closed_topo)
+        other = _topo(("DP-1", "SAM", "X", "B", "1080p", (0, 0)))
+        assert not profile_matches_monitor_set(prof, other)
+
+
+class TestFullStateHash:
+    def test_tracks_primary_and_scale_drift(self):
+        """primary/scale drift must change the hash or the applier's
+        unchanged-state short-circuit hides it from reconciliation."""
+        base = ConnectedOutput(
+            connector="DP-1",
+            identity=MonitorIdentity("DEL", "M", "S"),
+            current_mode="1920x1080",
+        )
+        t0 = Topology(outputs=(base,))
+        t_primary = Topology(outputs=(replace(base, is_primary=True),))
+        t_scale = Topology(outputs=(replace(base, current_scale=1.5),))
+        assert t0.full_state_hash != t_primary.full_state_hash
+        assert t0.full_state_hash != t_scale.full_state_hash
+        assert t0.identity_hash == t_primary.identity_hash
+
 
 # ---------------------------------------------------------------------------
 # Snapshot / round-trip
@@ -123,6 +169,54 @@ class TestSnapshotToProfile:
         assert restored.topology_hash == prof.topology_hash
         assert restored.priority == 5
         assert len(restored.outputs) == 1
+
+    def test_round_trip_preserves_slash_in_model(self):
+        """EDID model strings can contain '/' (e.g. AOC 'Q27G2S/EU'); the
+        identity must survive save/load field-for-field."""
+        prof = Profile(
+            name="slash",
+            topology_hash="abc",
+            outputs=(
+                OutputConfig(
+                    identity=MonitorIdentity("AOC", "Q27G2S/EU", "123"),
+                    mode="2560x1440",
+                ),
+            ),
+        )
+        restored = Profile.from_dict(json.loads(json.dumps(prof.to_dict())))
+        ident = restored.outputs[0].identity
+        assert ident.manufacturer == "AOC"
+        assert ident.model == "Q27G2S/EU"
+        assert ident.serial == "123"
+
+    def test_legacy_identity_string_still_loads(self):
+        data = {
+            "name": "legacy",
+            "topology_hash": "abc",
+            "outputs": [{"identity": "DEL/U2720Q/SN1", "mode": "3840x2160"}],
+        }
+        prof = Profile.from_dict(data)
+        ident = prof.outputs[0].identity
+        assert (ident.manufacturer, ident.model, ident.serial) == (
+            "DEL",
+            "U2720Q",
+            "SN1",
+        )
+
+    def test_round_trip_preserves_scale(self):
+        prof = Profile(
+            name="scaled",
+            topology_hash="abc",
+            outputs=(
+                OutputConfig(
+                    identity=MonitorIdentity("DEL", "UW", "1"),
+                    mode="3440x1440",
+                    scale=1.25,
+                ),
+            ),
+        )
+        restored = Profile.from_dict(json.loads(json.dumps(prof.to_dict())))
+        assert restored.outputs[0].scale == 1.25
 
 
 # ---------------------------------------------------------------------------

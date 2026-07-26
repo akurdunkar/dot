@@ -17,6 +17,7 @@ from typing import Callable
 from dbus_fast import BusType, Message, MessageType
 from dbus_fast.aio import MessageBus
 
+from ..topology import read_lid_state
 from ..types import DisplayEvent, EventKind
 
 log = logging.getLogger(__name__)
@@ -32,6 +33,33 @@ _MATCH_RULE = (
     f"path='{_UPOWER_PATH}',"
     f"sender='{_UPOWER_NAME}'"
 )
+
+
+async def get_lid_closed() -> bool:
+    """One-shot lid query from UPower, matching the daemon's live tracking.
+
+    Every producer of topology hashes (daemon, ctl) must read the lid from
+    the same source or saved profiles and live matching disagree; the
+    /proc/acpi reader is only a fallback for when UPower is unavailable.
+    Bounded by a timeout so a wedged system bus cannot stall the caller
+    (the daemon awaits this before its first reconcile)."""
+    try:
+        return await asyncio.wait_for(_query_lid_upower(), timeout=5.0)
+    except Exception as exc:
+        log.warning(
+            "UPower lid query failed (%s); falling back to /proc lid state", exc
+        )
+        return read_lid_state()
+
+
+async def _query_lid_upower() -> bool:
+    bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+    try:
+        if not bool(await _get_property(bus, "LidIsPresent")):
+            return False
+        return bool(await _get_property(bus, "LidIsClosed"))
+    finally:
+        bus.disconnect()
 
 
 async def watch_lid_upower(

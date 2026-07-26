@@ -19,6 +19,15 @@ from .policy import (
     save_profile,
     snapshot_to_profile,
 )
+from .watchers.upower import get_lid_closed
+
+
+async def _make_backend() -> LidAwareBackend:
+    """Backend with the lid state pinned from UPower, so ctl computes the
+    same topology hashes as the running daemon (which tracks lid via UPower)."""
+    lid_closed = await get_lid_closed()
+    return LidAwareBackend(detect_backend(), lambda: lid_closed)
+
 
 DEFAULT_PROFILE_DIR = Path(
     os.environ.get(
@@ -29,7 +38,7 @@ DEFAULT_PROFILE_DIR = Path(
 
 
 async def _cmd_show(args: argparse.Namespace) -> None:
-    backend = LidAwareBackend(detect_backend())
+    backend = await _make_backend()
     topo = await backend.get_topology()
     print(f"Topology identity hash: {topo.identity_hash}")
     print(f"Full state hash:        {topo.full_state_hash}")
@@ -54,7 +63,7 @@ async def _cmd_show(args: argparse.Namespace) -> None:
 
 
 async def _cmd_save(args: argparse.Namespace) -> None:
-    backend = LidAwareBackend(detect_backend())
+    backend = await _make_backend()
     topo = await backend.get_topology()
     if topo.monitor_count == 0:
         sys.exit("No connected outputs detected")
@@ -87,7 +96,7 @@ def _cmd_list(args: argparse.Namespace) -> None:
 
 
 async def _cmd_status(args: argparse.Namespace) -> None:
-    backend = LidAwareBackend(detect_backend())
+    backend = await _make_backend()
     topo = await backend.get_topology()
     profiles = load_profiles(args.profile_dir)
 
@@ -125,7 +134,7 @@ async def _cmd_status(args: argparse.Namespace) -> None:
 
 
 async def _cmd_sync(args: argparse.Namespace) -> None:
-    backend = LidAwareBackend(detect_backend())
+    backend = await _make_backend()
     profiles = load_profiles(args.profile_dir)
     if not profiles:
         sys.exit(f"No profiles in {args.profile_dir}")
@@ -191,18 +200,23 @@ def main() -> None:
     elif args.command == "sync":
         setup_logging("displayd", level=logging.INFO)
 
-    if args.command == "status":
-        asyncio.run(_cmd_status(args))
-    elif args.command == "show":
-        asyncio.run(_cmd_show(args))
-    elif args.command == "save":
-        asyncio.run(_cmd_save(args))
-    elif args.command == "list":
-        _cmd_list(args)
-    elif args.command == "delete":
-        _cmd_delete(args)
-    elif args.command == "sync":
-        asyncio.run(_cmd_sync(args))
+    try:
+        if args.command == "status":
+            asyncio.run(_cmd_status(args))
+        elif args.command == "show":
+            asyncio.run(_cmd_show(args))
+        elif args.command == "save":
+            asyncio.run(_cmd_save(args))
+        elif args.command == "list":
+            _cmd_list(args)
+        elif args.command == "delete":
+            _cmd_delete(args)
+        elif args.command == "sync":
+            asyncio.run(_cmd_sync(args))
+    except (RuntimeError, NotImplementedError, FileNotFoundError) as exc:
+        # e.g. xrandr failing (X not reachable), a Wayland session, or the
+        # xrandr binary missing entirely.
+        sys.exit(f"displayd-ctl: {exc}")
 
 
 if __name__ == "__main__":

@@ -67,6 +67,7 @@ class ConnectedOutput:
     current_position: tuple[int, int] = (0, 0)
     current_rotation: str = "normal"
     is_primary: bool = False
+    current_scale: float = 1.0
     edid_raw: bytes = b""
 
 
@@ -109,6 +110,8 @@ class Topology:
                 o.current_mode or "",
                 o.current_position,
                 o.current_rotation,
+                o.is_primary,
+                round(o.current_scale, 3),
             )
             for o in self.outputs
         )
@@ -148,7 +151,14 @@ class Profile:
             "priority": self.priority,
             "outputs": [
                 {
-                    "identity": o.identity.stable_id,
+                    # A field dict, not stable_id: model/serial strings from
+                    # EDID may themselves contain "/", which a joined string
+                    # cannot round-trip.
+                    "identity": {
+                        "manufacturer": o.identity.manufacturer,
+                        "model": o.identity.model,
+                        "serial": o.identity.serial,
+                    },
                     "enabled": o.enabled,
                     "mode": o.mode,
                     "position": list(o.position),
@@ -164,12 +174,21 @@ class Profile:
     def from_dict(cls, data: dict) -> Profile:
         outputs: list[OutputConfig] = []
         for entry in data.get("outputs", []):
-            parts = entry["identity"].split("/", 2)
-            identity = MonitorIdentity(
-                manufacturer=parts[0] if len(parts) > 0 else "???",
-                model=parts[1] if len(parts) > 1 else "???",
-                serial=parts[2] if len(parts) > 2 else "",
-            )
+            raw_identity = entry["identity"]
+            if isinstance(raw_identity, dict):
+                identity = MonitorIdentity(
+                    manufacturer=raw_identity.get("manufacturer", "???"),
+                    model=raw_identity.get("model", "???"),
+                    serial=raw_identity.get("serial", ""),
+                )
+            else:
+                # Legacy profiles stored the joined stable_id string.
+                parts = str(raw_identity).split("/", 2)
+                identity = MonitorIdentity(
+                    manufacturer=parts[0] if len(parts) > 0 else "???",
+                    model=parts[1] if len(parts) > 1 else "???",
+                    serial=parts[2] if len(parts) > 2 else "",
+                )
             outputs.append(
                 OutputConfig(
                     identity=identity,

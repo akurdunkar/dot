@@ -180,3 +180,80 @@ class TestReconciliationEdgeCases:
         topo = _topo(("DP-1", "DEL", "M", "S", "3440x1440", (0, 0), "normal", False))
         prof = Profile(name="empty", topology_hash=topo.identity_hash, outputs=())
         assert plan_reconciliation(topo, prof).is_noop
+
+
+class TestTwinMonitors:
+    """Identical monitors (same manufacturer/model, missing serials) fuzzy-
+    match each other; each must still resolve to its own connector."""
+
+    def test_twin_serialless_monitors_each_get_their_own_connector(self):
+        topo = _topo(
+            ("DP-1", "ACR", "K242HL", "", "1920x1080", (0, 0), "normal", True),
+            ("DP-2", "ACR", "K242HL", "", "1920x1080", (0, 0), "normal", False),
+        )
+        prof = _prof(topo, [
+            ("ACR", "K242HL", "", "1920x1080", (0, 0), "normal", True),
+            ("ACR", "K242HL", "", "1920x1080", (1920, 0), "normal", False),
+        ])
+        plan = plan_reconciliation(topo, prof)
+        assert [c for c, _ in plan.changes] == ["DP-2"]
+        assert plan.changes[0][1].position == (1920, 0)
+
+    def test_twin_monitors_never_duplicate_a_connector(self):
+        topo = _topo(
+            ("DP-1", "ACR", "K242HL", "", "1920x1080", (5, 5), "normal", False),
+            ("DP-2", "ACR", "K242HL", "", "1920x1080", (7, 7), "normal", False),
+        )
+        prof = _prof(topo, [
+            ("ACR", "K242HL", "", "1920x1080", (0, 0), "normal", True),
+            ("ACR", "K242HL", "", "1920x1080", (1920, 0), "normal", False),
+        ])
+        plan = plan_reconciliation(topo, prof)
+        connectors = [c for c, _ in plan.changes]
+        assert sorted(connectors) == ["DP-1", "DP-2"]
+
+
+class TestScale:
+    def test_scale_only_difference_needs_change(self):
+        topo = _topo(("DP-1", "DEL", "M", "S", "3440x1440", (0, 0), "normal", False))
+        prof = Profile(
+            name="scaled",
+            topology_hash=topo.identity_hash,
+            outputs=(
+                OutputConfig(
+                    identity=MonitorIdentity("DEL", "M", "S"),
+                    mode="3440x1440",
+                    position=(0, 0),
+                    scale=1.5,
+                ),
+            ),
+        )
+        plan = plan_reconciliation(topo, prof)
+        assert not plan.is_noop
+        assert plan.changes[0][1].scale == 1.5
+
+    def test_matching_scale_is_noop(self):
+        topo = Topology(
+            outputs=(
+                ConnectedOutput(
+                    connector="DP-1",
+                    identity=MonitorIdentity("DEL", "M", "S"),
+                    current_mode="3440x1440",
+                    current_position=(0, 0),
+                    current_scale=1.5,
+                ),
+            )
+        )
+        prof = Profile(
+            name="scaled",
+            topology_hash=topo.identity_hash,
+            outputs=(
+                OutputConfig(
+                    identity=MonitorIdentity("DEL", "M", "S"),
+                    mode="3440x1440",
+                    position=(0, 0),
+                    scale=1.5,
+                ),
+            ),
+        )
+        assert plan_reconciliation(topo, prof).is_noop

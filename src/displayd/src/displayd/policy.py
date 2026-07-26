@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import replace
 from pathlib import Path
 from typing import Optional
 
@@ -46,9 +47,39 @@ def save_profile(profile: Profile, profile_dir: Path) -> Path:
     return path
 
 
+def profiles_signature(profile_dir: Path) -> tuple:
+    """Cheap stat-based fingerprint of the profile directory, so the daemon
+    can notice out-of-band edits (displayd-ctl, hand editing) without parsing
+    every file on every check."""
+    if not profile_dir.is_dir():
+        return ()
+    entries = []
+    for path in sorted(profile_dir.glob("*.json")):
+        try:
+            st = path.stat()
+        except OSError:
+            continue
+        entries.append((path.name, st.st_mtime_ns, st.st_size))
+    return tuple(entries)
+
+
 # ---------------------------------------------------------------------------
 # Matching
 # ---------------------------------------------------------------------------
+
+
+def profile_matches_monitor_set(profile: Profile, topology: Topology) -> bool:
+    """True when the profile was saved for this topology's monitor set,
+    regardless of lid state.
+
+    Automatic matching stays lid-strict (a closed-lid setup is deliberately a
+    distinct topology); manually applying a profile only needs the monitor
+    set to be right, so a clamshell user can switch to a profile saved with
+    the lid in the other position."""
+    return profile.topology_hash in (
+        topology.identity_hash,
+        replace(topology, lid_closed=not topology.lid_closed).identity_hash,
+    )
 
 
 def match_profile(topology: Topology, profiles: list[Profile]) -> Optional[Profile]:
@@ -72,20 +103,42 @@ def match_profile(topology: Topology, profiles: list[Profile]) -> Optional[Profi
 # ---------------------------------------------------------------------------
 
 
+def _resolve_output(
+    topology: Topology,
+    identity: MonitorIdentity,
+    claimed: set[str],
+) -> Optional[ConnectedOutput]:
+    """Resolve a desired identity to an unclaimed connector.
+
+    Exact identity match wins over the fuzzy serial-wildcard match, and a
+    connector is never handed out twice: twin monitors with identical (or
+    missing) serials would otherwise all resolve to the first connector,
+    leaving the others unconfigured."""
+    for output in topology.outputs:
+        if output.connector not in claimed and output.identity == identity:
+            return output
+    for output in topology.outputs:
+        if output.connector not in claimed and output.identity.matches(identity):
+            return output
+    return None
+
+
 def plan_reconciliation(
     topology: Topology,
     profile: Profile,
 ) -> ReconciliationPlan:
     changes: list[tuple[str, OutputConfig]] = []
+    claimed: set[str] = set()
 
     for desired in profile.outputs:
-        output = topology.output_by_identity(desired.identity)
+        output = _resolve_output(topology, desired.identity, claimed)
         if output is None:
             log.warning(
                 "Profile output %s not present in topology",
                 desired.identity.stable_id,
             )
             continue
+        claimed.add(output.connector)
 
         if not desired.enabled:
             needs_change = output.current_mode is not None
@@ -95,6 +148,7 @@ def plan_reconciliation(
                 or output.current_position != desired.position
                 or output.current_rotation != desired.rotation
                 or output.is_primary != desired.primary
+                or abs(output.current_scale - desired.scale) > 0.01
             )
         if needs_change:
             changes.append((output.connector, desired))
@@ -127,6 +181,7 @@ def snapshot_to_profile(
             position=o.current_position,
             rotation=o.current_rotation,
             primary=o.is_primary,
+            scale=o.current_scale,
         )
         for o in topology.outputs
     )

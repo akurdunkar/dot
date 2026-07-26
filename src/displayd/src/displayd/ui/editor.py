@@ -42,6 +42,11 @@ class _EditorOutput:
     y: int
     rotation: str
     primary: bool
+    scale: float = 1.0
+    #: True while the output sits at an artificial "parking" position (the
+    #: strip right of the layout where disabled outputs are displayed).  A
+    #: parked position must never leak into an applied or saved layout.
+    parked: bool = False
 
     @property
     def size(self) -> tuple[int, int]:
@@ -77,6 +82,7 @@ def _build_model(topology: Topology) -> list[_EditorOutput]:
                     y=output.current_position[1],
                     rotation=output.current_rotation,
                     primary=output.is_primary,
+                    scale=output.current_scale,
                 )
             )
         else:
@@ -92,6 +98,7 @@ def _build_model(topology: Topology) -> list[_EditorOutput]:
                     y=0,
                     rotation="normal",
                     primary=False,
+                    parked=True,
                 )
             )
     _, _, max_x, _ = geometry.bounding_box([o.rect for o in enabled])
@@ -309,7 +316,18 @@ class LayoutEditorWindow(Gtk.Window):
         self._selected.enabled = switch.get_active()
         if not self._selected.enabled:
             self._selected.primary = False
-            self._sync_panel()
+        elif self._selected.parked:
+            # Dock a parked output flush against the layout instead of
+            # applying its artificial parking position (which would leave a
+            # dead, pointer-blocking strip between the monitors).
+            others = [
+                o.rect for o in self._outputs if o is not self._selected and o.enabled
+            ]
+            _, _, max_x, _ = geometry.bounding_box(others)
+            self._selected.x = max_x
+            self._selected.y = 0
+            self._selected.parked = False
+        self._sync_panel()
         self._canvas.queue_draw()
 
     def _on_mode_changed(self, combo: Gtk.ComboBoxText) -> None:
@@ -344,6 +362,7 @@ class LayoutEditorWindow(Gtk.Window):
             return
         self._selected.x = self._spn_x.get_value_as_int()
         self._selected.y = self._spn_y.get_value_as_int()
+        self._selected.parked = False
         self._canvas.queue_draw()
 
     # ------------------------------------------------------------------
@@ -455,6 +474,7 @@ class LayoutEditorWindow(Gtk.Window):
         output.x, output.y = geometry.snap_position(
             int(round(vx)), int(round(vy)), w, h, others, threshold
         )
+        output.parked = False
         self._sync_panel_position()
         area.queue_draw()
         return True
@@ -500,6 +520,7 @@ class LayoutEditorWindow(Gtk.Window):
                     position=normalized[output.connector],
                     rotation=output.rotation,
                     primary=output.connector == primary_connector,
+                    scale=output.scale,
                 )
             changes.append((output.connector, config))
         return changes
@@ -539,6 +560,12 @@ class LayoutEditorWindow(Gtk.Window):
         if self._topology is None:
             self._show_info("No topology loaded yet", error=True)
             return
+        changes = self._build_changes()
+        if not any(config.enabled for _, config in changes):
+            # Same guard as Apply: such a profile would be auto-applied on the
+            # next event and turn every display off.
+            self._show_info("Refusing to save: no output enabled", error=True)
+            return
         dialog = Gtk.Dialog(title="Save layout", transient_for=self, modal=True)
         dialog.add_button("_Cancel", Gtk.ResponseType.CANCEL)
         dialog.add_button("_Save", Gtk.ResponseType.OK)
@@ -564,7 +591,6 @@ class LayoutEditorWindow(Gtk.Window):
         if response != Gtk.ResponseType.OK:
             return
 
-        changes = self._build_changes()
         future = self._engine.save_layout(
             name,
             [config for _, config in changes],

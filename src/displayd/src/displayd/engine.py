@@ -19,6 +19,8 @@ from .policy import (
     load_profiles,
     match_profile,
     plan_reconciliation,
+    profile_matches_monitor_set,
+    profiles_signature,
     save_profile,
     snapshot_to_profile,
 )
@@ -26,12 +28,13 @@ from .topology import read_lid_state
 from .types import DisplayEvent, EventKind, OutputConfig, Profile, Topology
 from .watchers.drm import watch_drm
 from .watchers.logind import watch_logind
-from .watchers.upower import watch_lid_upower
+from .watchers.upower import get_lid_closed, watch_lid_upower
 
 log = logging.getLogger(__name__)
 
 RESUME_SETTLE_SECONDS = 3.0
 STARTUP_SETTLE_SECONDS = 5.0
+PROFILE_POLL_SECONDS = 10.0
 
 _RESUME_EVENTS = frozenset(
     {EventKind.RESUME, EventKind.LID_OPEN, EventKind.LID_CLOSE}
@@ -71,6 +74,7 @@ class Engine:
         self._backend = LidAwareBackend(inner, self._get_lid)
 
         self._profiles = load_profiles(profile_dir)
+        self._profiles_signature = profiles_signature(profile_dir)
         self._applier = DisplayApplier(
             backend=self._backend,
             profiles=self._profiles,
@@ -98,6 +102,7 @@ class Engine:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
         self._ready = threading.Event()
+        self._cooldown_retry: Optional[asyncio.Task] = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -148,21 +153,32 @@ class Engine:
             loop.close()
 
     async def _startup(self) -> None:
+        if self._enable_watchers:
+            # Align the initial lid state with UPower (the live tracking
+            # source) before the first reconcile; the /proc fallback used in
+            # __init__ is absent on many machines and would hash a different
+            # topology than the daemon settles on.
+            try:
+                self._set_lid(await get_lid_closed())
+            except Exception:
+                log.exception("Initial lid state read failed")
+
         self._spawn(self._consume_events(), "event-pump")
         if self._enable_watchers:
             self._spawn(watch_drm(self._queue), "drm")
             self._spawn(watch_logind(self._queue), "logind")
             self._spawn(watch_lid_upower(self._queue, self._set_lid), "upower-lid")
+            self._spawn(self._watch_profile_dir(), "profile-watch")
 
         log.info("Initial reconciliation")
         try:
-            await self._applier.reconcile(force=True)
+            await self._reconcile(force=True)
         except Exception:
             log.exception("Initial reconciliation failed")
         await self._refresh_state()
         self._spawn(self._deferred_reconcile(), "deferred-reconcile")
 
-    def _spawn(self, coro, name: str) -> None:
+    def _spawn(self, coro, name: str) -> asyncio.Task:
         """Run a background task on the engine loop, logging any crash."""
         task = asyncio.ensure_future(coro)
         task.set_name(f"displayd-{name}")
@@ -175,15 +191,44 @@ class Engine:
                 log.error("Background task %r died", name, exc_info=exc)
 
         task.add_done_callback(_done)
+        return task
 
     async def _deferred_reconcile(self) -> None:
         await asyncio.sleep(STARTUP_SETTLE_SECONDS)
         log.info("Deferred post-startup reconciliation")
         try:
-            await self._applier.reconcile(force=True)
+            await self._reconcile(force=True)
         except Exception:
             log.exception("Deferred reconciliation failed")
         await self._refresh_state()
+
+    async def _reconcile(self, *, force: bool) -> bool:
+        """Reconcile via the applier, picking up on-disk profile edits first
+        so out-of-band changes (displayd-ctl, hand edits) are honored."""
+        try:
+            await self._check_profiles_fresh()
+        except Exception:
+            log.exception("Profile freshness check failed")
+        return await self._applier.reconcile(force=force)
+
+    async def _check_profiles_fresh(self) -> bool:
+        signature = profiles_signature(self._profile_dir)
+        if signature == self._profiles_signature:
+            return False
+        log.info("Profile directory changed on disk; reloading profiles")
+        self._load_profiles_from_disk()
+        return True
+
+    async def _watch_profile_dir(self) -> None:
+        """Poll the profile directory so ctl-side saves/deletes reach the
+        tray and matching without waiting for the next display event."""
+        while True:
+            await asyncio.sleep(PROFILE_POLL_SECONDS)
+            try:
+                if await self._check_profiles_fresh():
+                    await self._refresh_state()
+            except Exception:
+                log.exception("Profile directory poll failed")
 
     async def _consume_events(self) -> None:
         while True:
@@ -193,6 +238,7 @@ class Engine:
     async def _on_coalesced(self, events: list[DisplayEvent]) -> None:
         if self.state.paused:
             log.info("Auto-apply paused; skipping %d event(s)", len(events))
+            await self._applier.cleanup_ghosts()
             await self._refresh_state()
             return
 
@@ -205,16 +251,47 @@ class Engine:
             await asyncio.sleep(RESUME_SETTLE_SECONDS)
             if self.state.paused:
                 log.info("Auto-apply paused during settle; skipping")
+                await self._applier.cleanup_ghosts()
                 await self._refresh_state()
                 return
 
         # force=False so the manual-change cooldown and the unchanged-state
         # short-circuit are honored; explicit "Sync now" still forces.
         try:
-            await self._applier.reconcile(force=False)
+            await self._reconcile(force=False)
         except Exception:
             log.exception("Event-driven reconciliation failed")
+        if self._applier.last_reconcile_suppressed:
+            # The event is consumed but its work is not done; retry once the
+            # cooldown ends or a dock during the window stays black forever.
+            self._schedule_cooldown_retry()
         await self._refresh_state()
+
+    def _schedule_cooldown_retry(self) -> None:
+        if self._cooldown_retry is not None and not self._cooldown_retry.done():
+            return
+        remaining = self._applier.cooldown.remaining_seconds
+        log.info(
+            "Reconcile deferred %.1f s until the manual-change cooldown ends",
+            remaining,
+        )
+        self._cooldown_retry = self._spawn(
+            self._cooldown_retry_wait(remaining), "cooldown-retry"
+        )
+
+    async def _cooldown_retry_wait(self, delay: float) -> None:
+        await asyncio.sleep(delay + 0.25)
+        log.info("Cooldown expired; running deferred reconciliation")
+        try:
+            await self._reconcile(force=False)
+        except Exception:
+            log.exception("Deferred cooldown reconciliation failed")
+        await self._refresh_state()
+        self._cooldown_retry = None
+        if self._applier.last_reconcile_suppressed:
+            # A manual change landed while we slept (or an event's reconcile
+            # was suppressed while we were finishing up); go around again.
+            self._schedule_cooldown_retry()
 
     # ------------------------------------------------------------------
     # State
@@ -238,8 +315,28 @@ class Engine:
         loop = self._loop
         if loop is not None and loop.is_running():
             loop.call_soon_threadsafe(self._notify_listeners, state)
+            if not paused:
+                # Events skipped while paused are gone; reconcile once so the
+                # layout catches up with whatever changed in the meantime.
+                # Via _spawn so a crash is logged, not silently swallowed.
+                loop.call_soon_threadsafe(
+                    lambda: self._spawn(
+                        self._resume_reconcile(), "unpause-reconcile"
+                    )
+                )
         else:
             self._notify_listeners(state)
+
+    async def _resume_reconcile(self) -> None:
+        try:
+            await self._reconcile(force=False)
+        except Exception:
+            log.exception("Post-unpause reconciliation failed")
+        if self._applier.last_reconcile_suppressed:
+            # The catch-up hit the manual-change cooldown; without a retry
+            # the events dropped while paused would be lost after all.
+            self._schedule_cooldown_retry()
+        await self._refresh_state()
 
     def _get_lid(self) -> bool:
         with self._lock:
@@ -284,7 +381,7 @@ class Engine:
                         p
                         for p in profiles
                         if p.name == active
-                        and p.topology_hash == topology.identity_hash
+                        and profile_matches_monitor_set(p, topology)
                     ),
                     None,
                 )
@@ -305,11 +402,19 @@ class Engine:
             state = self._state
         self._notify_listeners(state)
 
-    async def _reload_profiles(self) -> None:
+    def _load_profiles_from_disk(self) -> None:
+        # Signature first: a write landing mid-load then makes the stored
+        # signature stale and the next freshness check reloads (self-healing);
+        # the other order would stamp unseen content as already loaded.
+        signature = profiles_signature(self._profile_dir)
         profiles = load_profiles(self._profile_dir)
+        self._profiles_signature = signature
         with self._lock:
             self._profiles = profiles
         self._applier.reload_profiles(profiles)
+
+    async def _reload_profiles(self) -> None:
+        self._load_profiles_from_disk()
         await self._refresh_state()
 
     # ------------------------------------------------------------------
@@ -358,7 +463,7 @@ class Engine:
         return asyncio.run_coroutine_threadsafe(coro, loop)
 
     async def _sync_now(self) -> bool:
-        ok = await self._applier.reconcile(force=True)
+        ok = await self._reconcile(force=True)
         await self._refresh_state()
         return ok
 
@@ -374,12 +479,14 @@ class Engine:
         if profile is None:
             raise ValueError(f"No profile named {name!r}")
         topology = await self._backend.get_topology()
-        if not any(
-            topology.output_by_identity(o.identity) is not None
-            for o in profile.outputs
-        ):
+        # Applying a profile from a different monitor set could --off the
+        # only connected display (its entries for absent monitors are
+        # skipped, its disable entries still apply).  Lid state is ignored
+        # here: an explicit switch to a same-monitor profile saved with the
+        # lid in the other position is legitimate.
+        if not profile_matches_monitor_set(profile, topology):
             raise ValueError(
-                f"Profile {name!r} matches none of the connected monitors"
+                f"Profile {name!r} was saved for a different monitor set"
             )
         plan = plan_reconciliation(topology, profile)
         if plan.is_noop:
@@ -397,6 +504,10 @@ class Engine:
         topology_hash: str,
         priority: int,
     ) -> Path:
+        if not any(o.enabled for o in outputs):
+            # Such a profile would be auto-applied on the next event and turn
+            # every display off with no UI left to recover from.
+            raise ValueError("Refusing to save a layout with no enabled outputs")
         profile = Profile(
             name=name,
             topology_hash=topology_hash,

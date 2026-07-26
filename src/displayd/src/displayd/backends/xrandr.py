@@ -33,12 +33,22 @@ _OUTPUT_HEADER = re.compile(
     r"(?:\(0x[0-9a-fA-F]+\)\s*)?"
     r"(?:(left|right|inverted|normal)\s+)?"
 )
+# Mode names are not always WxH: interlaced modes ("1920x1080i"), custom
+# modelines ("1920x1080_60.00"), and --newmode names (which may even contain
+# spaces) are all real xrandr names, so match lazily up to the
+# "(0x...) ...MHz" tail that anchors the verbose form.
 # Verbose: "  3440x1440 (0x6a6) 319.750MHz +HSync -VSync *current +preferred"
-_MODE_LINE_VERBOSE = re.compile(r"^\s+(\d+x\d+)\s+\(0x[0-9a-fA-F]+\)\s+[\d.]+MHz\b(.*)")
+_MODE_LINE_VERBOSE = re.compile(
+    r"^\s+(\S.*?)\s+\(0x[0-9a-fA-F]+\)\s+[\d.]+MHz\b(.*)"
+)
 # Non-verbose: "  3440x1440     59.97*+  29.99"
-_MODE_LINE_SIMPLE = re.compile(r"^\s+(\d+x\d+)\s+([\d.]+)(\*?)(\+?)")
+_MODE_LINE_SIMPLE = re.compile(r"^\s+(\d+x\d+\S*)\s+([\d.]+)(\*?)(\+?)")
 _EDID_TAG = re.compile(r"^\s+EDID:\s*$")
 _HEX_LINE = re.compile(r"^\s+([0-9a-fA-F]+)\s*$")
+# --scale writes a diagonal transform matrix; the first row shares the
+# "Transform:" line, the remaining rows follow on their own lines.
+_TRANSFORM_ROW1 = re.compile(r"^\s+Transform:\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s*$")
+_TRANSFORM_ROW = re.compile(r"^\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s*$")
 
 
 def _parse_xrandr_verbose(
@@ -60,13 +70,15 @@ def _parse_xrandr_verbose(
     cur_mode: Optional[str] = None
     cur_pos = (0, 0)
     cur_rotation = "normal"
+    cur_scale = 1.0
+    pending_row1: Optional[tuple[float, float, float]] = None
     modes: list[str] = []
     edid_hex = ""
     in_edid = False
 
     def _flush() -> None:
         nonlocal name, connected, primary, has_geometry, cur_mode, cur_pos
-        nonlocal cur_rotation, modes, edid_hex, in_edid
+        nonlocal cur_rotation, cur_scale, pending_row1, modes, edid_hex, in_edid
         if name and connected:
             identity = UNKNOWN_IDENTITY
             edid_raw = b""
@@ -85,6 +97,7 @@ def _parse_xrandr_verbose(
                     current_position=cur_pos,
                     current_rotation=cur_rotation,
                     is_primary=primary,
+                    current_scale=cur_scale,
                     edid_raw=edid_raw,
                 )
             )
@@ -97,6 +110,8 @@ def _parse_xrandr_verbose(
         cur_mode = None
         cur_pos = (0, 0)
         cur_rotation = "normal"
+        cur_scale = 1.0
+        pending_row1 = None
         modes = []
         edid_hex = ""
         in_edid = False
@@ -127,6 +142,34 @@ def _parse_xrandr_verbose(
             else:
                 in_edid = False
 
+        t1 = _TRANSFORM_ROW1.match(line)
+        if t1 and name:
+            try:
+                pending_row1 = tuple(float(g) for g in t1.groups())
+            except ValueError:
+                pending_row1 = None
+            continue
+
+        if pending_row1 is not None:
+            row1, pending_row1 = pending_row1, None
+            t2 = _TRANSFORM_ROW.match(line)
+            if t2:
+                try:
+                    row2 = tuple(float(g) for g in t2.groups())
+                except ValueError:
+                    row2 = None
+                # Only trust a plain diagonal (scale-only) transform; leave
+                # anything exotic at the default so we never fight it.
+                if (
+                    row2 is not None
+                    and row1[0] > 0
+                    and row2[1] > 0
+                    and abs(row1[1]) < 1e-6
+                    and abs(row2[0]) < 1e-6
+                ):
+                    cur_scale = row1[0]
+                continue
+
         mv = _MODE_LINE_VERBOSE.match(line)
         if mv and name:
             mode = mv.group(1)
@@ -155,32 +198,26 @@ def _parse_xrandr_verbose(
 
 
 class XrandrBackend(DisplayBackend):
-    def __init__(self) -> None:
-        self._stale_outputs: list[str] = []
-
     def session_type(self) -> str:
         return "x11"
 
     async def get_topology(self) -> Topology:
         stdout = await _run("--verbose", "--props")
-        outputs, self._stale_outputs = _parse_xrandr_verbose(stdout)
+        outputs, _ = _parse_xrandr_verbose(stdout)
         return Topology(outputs=tuple(outputs))
 
     async def apply(self, changes: list[tuple[str, OutputConfig]]) -> bool:
         args = _build_apply_args(changes)
-
-        # Turn off disconnected outputs that still hold a CRTC (ghost outputs)
-        for stale_name in self._stale_outputs:
-            if not any(c == stale_name for c, _ in changes):
-                log.info("Cleaning up stale disconnected output %s", stale_name)
-                args.extend(["--output", stale_name, "--off"])
-
         if not args:
             return True
         return await _run_apply(args)
 
     async def cleanup_stale(self) -> list[str]:
-        stale = list(self._stale_outputs)
+        # Detect ghosts from a fresh read: a cached list could name an output
+        # that was replugged (and is active again) since the last topology
+        # read, and turning that off would blank a live monitor.
+        stdout = await _run("--verbose", "--props")
+        _, stale = _parse_xrandr_verbose(stdout)
         if not stale:
             return []
         args: list[str] = []
@@ -189,7 +226,6 @@ class XrandrBackend(DisplayBackend):
         log.info("Turning off stale disconnected output(s): %s", ", ".join(stale))
         if not await _run_apply(args):
             return []
-        self._stale_outputs = []
         return stale
 
     async def verify(self, changes: list[tuple[str, OutputConfig]]) -> bool:
@@ -234,6 +270,14 @@ class XrandrBackend(DisplayBackend):
                         desired.rotation,
                     )
                     return False
+                if abs(output.current_scale - desired.scale) > 0.01:
+                    log.warning(
+                        "Verify: %s scale %.3f != desired %.3f",
+                        connector,
+                        output.current_scale,
+                        desired.scale,
+                    )
+                    return False
         return True
 
 
@@ -257,8 +301,10 @@ def _build_apply_args(changes: list[tuple[str, OutputConfig]]) -> list[str]:
         args.extend(["--rotate", cfg.rotation])
         if cfg.primary:
             args.append("--primary")
-        if cfg.scale != 1.0:
-            args.extend(["--scale", f"{cfg.scale}x{cfg.scale}"])
+        # Always pass --scale, like --rotate: omitting it would leave a
+        # previously scaled output scaled when the desired scale is 1.0,
+        # and verify() would then fail forever.
+        args.extend(["--scale", f"{cfg.scale}x{cfg.scale}"])
     return args
 
 
@@ -294,10 +340,10 @@ async def _run(*args: str) -> str:
     )
     stdout, stderr = await proc.communicate()
     if proc.returncode != 0:
-        log.error(
-            "xrandr %s failed (rc=%d): %s",
-            " ".join(args),
-            proc.returncode,
-            stderr.decode(errors="replace"),
+        # Raise instead of returning the (empty) stdout: a failed read must
+        # look like a failure upstream, not like a topology with no outputs.
+        raise RuntimeError(
+            f"xrandr {' '.join(args)} failed (rc={proc.returncode}): "
+            f"{stderr.decode(errors='replace').strip()}"
         )
     return stdout.decode(errors="replace")

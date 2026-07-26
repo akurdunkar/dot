@@ -32,13 +32,18 @@ class CooldownTracker:
 
     @property
     def is_suppressed(self) -> bool:
-        if self._last_manual <= 0:
-            return False
-        remaining = self._cooldown - (time.monotonic() - self._last_manual)
+        remaining = self.remaining_seconds
         if remaining > 0:
             log.debug("Auto-apply suppressed: %.1f s remaining", remaining)
             return True
         return False
+
+    @property
+    def remaining_seconds(self) -> float:
+        """Seconds until the cooldown window ends (0 when inactive)."""
+        if self._last_manual <= 0:
+            return 0.0
+        return max(0.0, self._cooldown - (time.monotonic() - self._last_manual))
 
     def reset(self) -> None:
         self._last_manual = 0.0

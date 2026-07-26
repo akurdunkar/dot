@@ -17,6 +17,7 @@ import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import GLib, Gtk
 
+from ..policy import profile_matches_monitor_set
 from . import icon as icon_mod
 
 if TYPE_CHECKING:
@@ -134,6 +135,13 @@ class TrayIcon:
         for profile in state.profiles:
             marker = "● " if profile.name == state.matched_profile else "  "
             item = Gtk.MenuItem(label=marker + profile.name)
+            # A profile saved for a different monitor set cannot be applied
+            # (the engine refuses it -- applying could --off the only
+            # display), so gray it out instead of offering a dead click.
+            item.set_sensitive(
+                state.topology is not None
+                and profile_matches_monitor_set(profile, state.topology)
+            )
             item.connect("activate", self._on_apply_profile, profile.name)
             menu.append(item)
 

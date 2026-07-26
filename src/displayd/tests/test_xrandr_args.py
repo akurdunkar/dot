@@ -40,6 +40,14 @@ def test_disabled_output_gets_off_and_nothing_else():
     assert args == ["--output", "DP-1", "--off"]
 
 
+def test_scale_one_is_always_passed():
+    """Like --rotate normal: omitting --scale would leave a previously
+    scaled output scaled, and verification would then fail forever."""
+    args = _build_apply_args([("DP-1", _cfg(scale=1.0))])
+    idx = args.index("--scale")
+    assert args[idx + 1] == "1.0x1.0"
+
+
 def test_full_argument_set():
     cfg = _cfg(mode="3840x2160", position=(1920, 0), primary=True, scale=1.5)
     args = _build_apply_args([("HDMI-1", cfg)])
@@ -56,3 +64,9 @@ def test_full_argument_set():
         "--scale",
         "1.5x1.5",
     ]
+
+
+def test_enabled_output_without_explicit_scale_resets_to_one():
+    args = _build_apply_args([("DP-1", _cfg())])
+    idx = args.index("--scale")
+    assert args[idx + 1] == "1.0x1.0"
