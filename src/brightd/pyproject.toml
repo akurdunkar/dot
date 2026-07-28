@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "brightd"
+version = "0.1.0"
+description = "Tray brightness control for internal and DDC/CI displays"
+requires-python = ">=3.11"
+dependencies = [
+    "PyGObject>=3.42",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+brightd = "brightd.app:main"
+brightd-ctl = "brightd.ctl:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+# PyGObject-stubs deliberately is NOT a declared dependency: it must be
+# installed with PYGOBJECT_STUB_CONFIG=Gtk3,Gdk3 set, or pip selects the GTK4
+# stubs, which contain no Gtk.StatusIcon at all. See `make dev`.
+[tool.pyright]
+include = ["src", "tests"]
+extraPaths = ["src"]
+pythonVersion = "3.12"
+pythonPlatform = "Linux"
+typeCheckingMode = "strict"
+# gi ships no py.typed of its own; the stub package supplies the types and this
+# warning only reports that the runtime module has no inline annotations.
+reportMissingModuleSource = "none"
+
+# pytest.approx has an untyped signature, so strict mode flags every use as
+# partially unknown. That is a gap in pytest's own annotations rather than in
+# this code, so it is relaxed for the test tree only -- src stays fully strict.
+[[tool.pyright.executionEnvironments]]
+root = "tests"
+reportUnknownMemberType = "none"
+
+[[tool.pyright.executionEnvironments]]
+root = "src"
