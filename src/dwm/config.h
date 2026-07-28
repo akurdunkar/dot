@@ -32,7 +32,6 @@ static const char *colors[][3]      = {
     /*              fg                 bg                 border   */
    [SchemeNorm] = { col_statusbar_fg,  col_statusbar_bg, col_border},
    [SchemeSel]  = { col_primary_fg,    col_primary_bg  , col_border_sel},
-   [SchemeHid]  = { col_primary_bg,    col_statusbar_bg, col_border},
 };
 
 /* tagging */
@@ -131,8 +130,8 @@ static Key keys[] = {
   { Super,                                     XK_l,                        focusdir,              {.i = 1 } },
   { Super | ShiftMask,                         XK_h,                        setmfact,              {.f = -0.05} },
   { Super | ShiftMask,                         XK_l,                        setmfact,              {.f = +0.05} },
-  { Super | ShiftMask,                         XK_j,                        focusstackhid,         {.i = +1 } },
-  { Super | ShiftMask,                         XK_k,                        focusstackhid,         {.i = -1 } },
+  { Super | ShiftMask,                         XK_j,                        focusstack,            {.i = +1 } },
+  { Super | ShiftMask,                         XK_k,                        focusstack,            {.i = -1 } },
   { Super | ShiftMask,                         XK_minus,                    incnmaster,            {.i = -1 } },
   { Super | ShiftMask,                         XK_equal,                    incnmaster,            {.i = +1 } },
   { Super,                                     XK_Tab,                      view,                  {0} },
@@ -151,8 +150,6 @@ static Key keys[] = {
   { Super,                                     XK_equal,                    setgaps,               {.i = +1 } },
   { Super | ShiftMask,                         XK_equal,                    setgaps,               {.i = 0  } },
   { Super | ShiftMask,                         XK_space,                    togglefloating,        {0} },
-  { Super,                                     XK_s,                        show,                  {0} },
-  { Super,                                     XK_t,                        hide,                  {0} },
   { Super | ShiftMask | ControlMask,           XK_q,                        quit,                  {0} },
   TAGKEYS(                                     XK_1,                        0)
   TAGKEYS(                                     XK_2,                        1)
@@ -171,7 +168,7 @@ static Button buttons[] = {
     /* click                event mask      button          function        argument */
     { ClkLtSymbol,          0,              Button1,        setlayout,      {0} },
     { ClkLtSymbol,          0,              Button3,        setlayout,      {.v = &layouts[2]} },
-    { ClkWinTitle,          0,              Button1,        togglewin,      {0} },
+    { ClkWinTitle,          0,              Button1,        focuswin,       {0} },
     { ClkWinTitle,          0,              Button2,        zoom,           {0} },
     { ClkClientWin,         MODKEY,         Button1,        movemouse,      {0} },
     { ClkClientWin,         MODKEY,         Button2,        togglefloating, {0} },
