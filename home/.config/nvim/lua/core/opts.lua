@@ -11,7 +11,7 @@ vim.g["mapleader"]                     = " "
 
 vim.cmd [[
     syntax enable
-    color base16-danqing
+    color base16-selenized-light
     syntax on
 ]]
 
