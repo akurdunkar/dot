@@ -6,7 +6,7 @@ which is also why it is worth testing directly.
 
 from __future__ import annotations
 
-from da.ui.geometry import EDGE, GAP, Rect, place_panel
+from calendard.ui.geometry import EDGE, GAP, Rect, place_panel
 
 MONITOR = Rect(0, 0, 1920, 1080)
 """A single 1080p screen with a top bar."""

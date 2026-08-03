@@ -1,4 +1,4 @@
-"""``da`` -- a tray calendar you navigate and nothing more."""
+"""``calendard`` -- a tray calendar you navigate and nothing more."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ log = logging.getLogger(__name__)
 
 
 def _acquire_instance_lock() -> IO[str]:
-    """Take an exclusive advisory lock so only one da runs per user.
+    """Take an exclusive advisory lock so only one calendard runs per user.
 
     Two instances put two identical icons in the tray, each with its own panel
     and its own grab -- and whichever one grabs second silently loses input.
@@ -27,9 +27,9 @@ def _acquire_instance_lock() -> IO[str]:
     """
     runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
     if runtime_dir:
-        lock_path = Path(runtime_dir) / "da.lock"
+        lock_path = Path(runtime_dir) / "calendard.lock"
     else:
-        lock_path = Path(f"/tmp/da-{os.getuid()}.lock")
+        lock_path = Path(f"/tmp/calendard-{os.getuid()}.lock")
 
     lock_file = open(lock_path, "w")
     try:
@@ -37,14 +37,14 @@ def _acquire_instance_lock() -> IO[str]:
     except OSError:
         # Exit 0: an already-running daemon is a satisfied start request, and a
         # non-zero status would make the systemd user unit restart-loop.
-        print("da is already running", file=sys.stderr)
+        print("calendard is already running", file=sys.stderr)
         sys.exit(0)
     return lock_file
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="da",
+        prog="calendard",
         description="Tray calendar: a month grid you can page through",
     )
     parser.add_argument(
@@ -66,7 +66,7 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = _build_parser().parse_args()
     setup_logging(
-        "da",
+        "calendard",
         level=logging.DEBUG if args.verbose else logging.INFO,
         json_format=args.json_log,
     )

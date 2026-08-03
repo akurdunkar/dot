@@ -1,4 +1,4 @@
-# da user unit. startx/dwm users without a managed
+# calendard user unit. startx/dwm users without a managed
 # graphical-session.target should prefer the autostart.sh line instead.
 # For this unit to work, DISPLAY must be imported into the user manager:
 #   systemctl --user import-environment DISPLAY
@@ -6,13 +6,13 @@
 # (non-root pip installs land in ~/.local/bin, not /usr/local/bin).
 
 [Unit]
-Description=da tray calendar
+Description=calendard tray calendar
 After=graphical-session.target
 PartOf=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/da
+ExecStart=/usr/local/bin/calendard
 Restart=on-failure
 RestartSec=5
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 import cairo
 import pytest
 
-from da.ui.icon import draw_icon
+from calendard.ui.icon import draw_icon
 
 SIZES = [16, 19, 22, 24, 48]
 """19 is what dwm's systray asks for here; the rest bracket it."""

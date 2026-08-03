@@ -13,7 +13,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from da.month import (
+from calendard.month import (
     COLUMNS,
     MAX_YEAR,
     MIN_YEAR,

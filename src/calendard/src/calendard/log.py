@@ -1,4 +1,4 @@
-"""Structured logging setup for da components."""
+"""Structured logging setup for calendard components."""
 
 from __future__ import annotations
 

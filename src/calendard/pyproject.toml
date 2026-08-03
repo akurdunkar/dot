@@ -3,7 +3,7 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "da"
+name = "calendard"
 version = "0.1.0"
 description = "Tray calendar: a month grid you can page through, and nothing else"
 requires-python = ">=3.11"
@@ -17,7 +17,7 @@ dev = [
 ]
 
 [project.scripts]
-da = "da.app:main"
+calendard = "calendard.app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

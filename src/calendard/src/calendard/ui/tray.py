@@ -31,7 +31,7 @@ log = logging.getLogger(__name__)
 _EMBED_CHECKS_SECONDS = (5, 15, 60)
 """Backoff for the embed check.
 
-da can easily start before dwm's systray window exists -- from ``autostart.sh``,
+calendard can easily start before dwm's systray window exists -- from ``autostart.sh``,
 or during a dwm restart -- so a single one-shot check that gives up forever
 would leave the user with no icon and no explanation.
 """

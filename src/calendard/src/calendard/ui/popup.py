@@ -42,27 +42,27 @@ _CELL_HEIGHT = 26
 _REOPEN_GUARD_MS = 250
 
 _CSS = """
-#da-popup {{ background-color: {bg}; }}
-#da-popup label {{ color: {fg}; }}
-#da-popup .da-title {{ font-weight: bold; padding: 0 8px; }}
-#da-popup .da-arrow {{ font-size: 125%; padding: 0 6px; }}
-#da-popup .da-weekday {{ font-size: 88%; color: {dim}; }}
-#da-popup .da-weeknum {{ font-size: 84%; color: {faint}; padding-right: 4px; }}
-#da-popup .da-outside {{ color: {faint}; }}
-#da-popup .da-today {{
+#calendard-popup {{ background-color: {bg}; }}
+#calendard-popup label {{ color: {fg}; }}
+#calendard-popup .calendard-title {{ font-weight: bold; padding: 0 8px; }}
+#calendard-popup .calendard-arrow {{ font-size: 125%; padding: 0 6px; }}
+#calendard-popup .calendard-weekday {{ font-size: 88%; color: {dim}; }}
+#calendard-popup .calendard-weeknum {{ font-size: 84%; color: {faint}; padding-right: 4px; }}
+#calendard-popup .calendard-outside {{ color: {faint}; }}
+#calendard-popup .calendard-today {{
     background-color: {accent};
     color: {accent_fg};
     border-radius: 4px;
     font-weight: bold;
 }}
-#da-popup .da-rule {{ background-color: {faint}; min-height: 1px; }}
+#calendard-popup .calendard-rule {{ background-color: {faint}; min-height: 1px; }}
 """
-"""Every class rule is scoped under ``#da-popup`` deliberately.
+"""Every class rule is scoped under ``#calendard-popup`` deliberately.
 
 The base rule needs the id to keep this stylesheet off the rest of the process's
 widgets -- it is installed on the whole screen, which is the only place GTK3
-lets you add a provider.  But that makes it ``#da-popup label``, specificity
-(1,0,1), and a bare ``.da-outside`` at (0,1,0) then loses to it: the dimming
+lets you add a provider.  But that makes it ``#calendard-popup label``, specificity
+(1,0,1), and a bare ``.calendard-outside`` at (0,1,0) then loses to it: the dimming
 silently does nothing while the panel still looks plausible.  Scoping the class
 rules too puts them at (1,1,0), which wins.
 """
@@ -91,11 +91,11 @@ class CalendarPopup:
         self._closed_at = 0.0
 
         self._win = Gtk.Window(type=Gtk.WindowType.POPUP)
-        self._win.set_name("da-popup")
+        self._win.set_name("calendard-popup")
         # An override-redirect window has no WM to show a title, but setting it
         # makes the panel identifiable in xwininfo/xprop when diagnosing where
         # it actually landed.
-        self._win.set_title("da-popup")
+        self._win.set_title("calendard-popup")
         self._win.set_resizable(False)
         self._win.add_events(
             Gdk.EventMask.BUTTON_PRESS_MASK
@@ -130,7 +130,7 @@ class CalendarPopup:
         """Lay out the fixed grid once.
 
         Built once and thereafter only relabelled: the row count is fixed at
-        six (see :mod:`da.month`), so navigation never needs to add or remove a
+        six (see :mod:`calendard.month`), so navigation never needs to add or remove a
         widget -- which it could not safely do anyway while the panel holds the
         seat grab those widgets live under.
         """
@@ -151,7 +151,7 @@ class CalendarPopup:
         self._title.set_relief(Gtk.ReliefStyle.NONE)
         self._title.set_can_focus(False)
         self._title.set_hexpand(True)
-        self._title.get_style_context().add_class("da-title")
+        self._title.get_style_context().add_class("calendard-title")
         self._title.set_tooltip_text("Back to today")
         self._title.connect("clicked", self._on_title_clicked)
 
@@ -164,18 +164,18 @@ class CalendarPopup:
 
         for column, text in enumerate(self._weekday_labels()):
             label = Gtk.Label(label=text)
-            label.get_style_context().add_class("da-weekday")
+            label.get_style_context().add_class("calendard-weekday")
             label.set_size_request(_CELL_WIDTH, -1)
             self._grid.attach(label, day_column + column, 1, 1, 1)
 
         rule = Gtk.Box()
-        rule.get_style_context().add_class("da-rule")
+        rule.get_style_context().add_class("calendard-rule")
         self._grid.attach(rule, 0, 2, total_columns, 1)
 
         for row in range(ROWS):
             if self._show_week_numbers:
                 week_label = Gtk.Label(label="")
-                week_label.get_style_context().add_class("da-weeknum")
+                week_label.get_style_context().add_class("calendard-weeknum")
                 week_label.set_xalign(1.0)
                 self._grid.attach(week_label, 0, 3 + row, 1, 1)
                 self._week_labels.append(week_label)
@@ -183,7 +183,7 @@ class CalendarPopup:
             cells: list[Gtk.Label] = []
             for column in range(COLUMNS):
                 label = Gtk.Label(label="")
-                label.get_style_context().add_class("da-day")
+                label.get_style_context().add_class("calendard-day")
                 label.set_size_request(_CELL_WIDTH, _CELL_HEIGHT)
                 self._grid.attach(label, day_column + column, 3 + row, 1, 1)
                 cells.append(label)
@@ -199,7 +199,7 @@ class CalendarPopup:
         button = Gtk.Button(label=text)
         button.set_relief(Gtk.ReliefStyle.NONE)
         button.set_can_focus(False)
-        button.get_style_context().add_class("da-arrow")
+        button.get_style_context().add_class("calendard-arrow")
         button.set_tooltip_text(tooltip)
         button.connect("clicked", handler, delta)
         return button
@@ -258,12 +258,12 @@ class CalendarPopup:
                 label = self._day_labels[row][column]
                 label.set_label(str(cell.date.day))
                 context = label.get_style_context()
-                context.remove_class("da-outside")
-                context.remove_class("da-today")
+                context.remove_class("calendard-outside")
+                context.remove_class("calendard-today")
                 if not cell.in_month:
-                    context.add_class("da-outside")
+                    context.add_class("calendard-outside")
                 if cell.date == self._today:
-                    context.add_class("da-today")
+                    context.add_class("calendard-today")
 
     def set_today(self, today: date) -> None:
         """Move the highlight after a day rollover.

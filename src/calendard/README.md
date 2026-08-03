@@ -1,4 +1,4 @@
-# da
+# calendard
 
 A tray calendar. The icon is a calendar page showing today's date; click it and
 a month grid drops out of the tray, which you can page through with the arrows,
@@ -34,7 +34,7 @@ length in the modules they affect:
 ## Install
 
 ```sh
-make install     # installs da and a systemd user unit
+make install     # installs calendard and a systemd user unit
 make dev         # editable install + pytest + PyGObject type stubs
 make test        # 157 tests, no X server needed
 make typecheck
@@ -45,18 +45,18 @@ make typecheck
 Pick **one** method. Either from dwm's autostart:
 
 ```sh
-nohup da >>/tmp/da.log 2>&1 &
+nohup calendard >>/tmp/calendard.log 2>&1 &
 ```
 
 or via the systemd user unit (requires a managed `graphical-session.target` and
 `systemctl --user import-environment DISPLAY`):
 
 ```sh
-systemctl --user enable --now da
+systemctl --user enable --now calendard
 ```
 
 A file lock in `$XDG_RUNTIME_DIR` guarantees one instance per user — a second
-invocation prints "da is already running" and exits 0, so re-running
+invocation prints "calendard is already running" and exits 0, so re-running
 `autostart.sh` is harmless. Without it you get two identical tray icons, and
 whichever panel grabs second silently receives no input.
 
@@ -116,7 +116,7 @@ If that turns out to be wrong, the hook is `TrayIcon._on_activate`.
 ## Layout
 
 ```
-src/da/
+src/calendard/
 ├── month.py       # the grid: pure, no GTK, no clock -- most of the tests
 ├── clock.py       # day rollover
 ├── log.py

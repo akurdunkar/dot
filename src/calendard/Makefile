@@ -9,24 +9,24 @@ PYRIGHT ?= $(shell command -v pyright 2>/dev/null || echo $(HOME)/.local/share/n
 
 install:
 	pip install --break-system-packages .
-	@BIN=$$(command -v da || echo /usr/local/bin/da); \
+	@BIN=$$(command -v calendard || echo /usr/local/bin/calendard); \
 	if [ "$$(id -u)" = "0" ]; then \
-		DEST=$(SYSTEMD_GLOBAL_USER_DIR)/da.service; \
+		DEST=$(SYSTEMD_GLOBAL_USER_DIR)/calendard.service; \
 	else \
 		mkdir -p $(SYSTEMD_USER_DIR); \
-		DEST=$(SYSTEMD_USER_DIR)/da.service; \
+		DEST=$(SYSTEMD_USER_DIR)/calendard.service; \
 	fi; \
-	sed "s|^ExecStart=.*|ExecStart=$$BIN|" systemd/da.service > $$DEST; \
+	sed "s|^ExecStart=.*|ExecStart=$$BIN|" systemd/calendard.service > $$DEST; \
 	chmod 644 $$DEST; \
 	echo "Installed unit to $$DEST (ExecStart=$$BIN)"
-	@echo "Start da either from dwm's autostart (nohup da &)"
-	@echo "or via 'systemctl --user enable --now da' (needs DISPLAY imported:"
+	@echo "Start calendard either from dwm's autostart (nohup calendard &)"
+	@echo "or via 'systemctl --user enable --now calendard' (needs DISPLAY imported:"
 	@echo "systemctl --user import-environment DISPLAY). Pick ONE method."
 
 uninstall:
-	pip uninstall -y da --break-system-packages
-	rm -f $(SYSTEMD_USER_DIR)/da.service
-	@if [ "$$(id -u)" = "0" ]; then rm -f $(SYSTEMD_GLOBAL_USER_DIR)/da.service; fi
+	pip uninstall -y calendard --break-system-packages
+	rm -f $(SYSTEMD_USER_DIR)/calendard.service
+	@if [ "$$(id -u)" = "0" ]; then rm -f $(SYSTEMD_GLOBAL_USER_DIR)/calendard.service; fi
 	@echo "Uninstalled."
 
 reinstall: uninstall install
@@ -46,8 +46,8 @@ test:
 # include paths do not resolve, which otherwise reads as a clean run.
 typecheck:
 	@test -x "$(PYRIGHT)" || { echo "pyright not found (tried: $(PYRIGHT))"; exit 1; }
-	@"$(PYRIGHT)" --project . --outputjson > /tmp/da-pyright.json || true
+	@"$(PYRIGHT)" --project . --outputjson > /tmp/calendard-pyright.json || true
 	@python3 -c "import json, sys; \
-s = json.load(open('/tmp/da-pyright.json'))['summary']; \
+s = json.load(open('/tmp/calendard-pyright.json'))['summary']; \
 print('pyright: %d files, %d errors, %d warnings' % (s['filesAnalyzed'], s['errorCount'], s['warningCount'])); \
 sys.exit(1) if s['filesAnalyzed'] == 0 or s['errorCount'] else None"

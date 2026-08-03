@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from da.clock import MAX_DELAY_SECONDS, seconds_until_midnight
+from calendard.clock import MAX_DELAY_SECONDS, seconds_until_midnight
 
 
 class TestSecondsUntilMidnight:
