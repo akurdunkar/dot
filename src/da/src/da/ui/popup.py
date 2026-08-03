@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import warnings
 from datetime import date
+from typing import Callable
 
 import gi
 
@@ -137,9 +138,14 @@ class CalendarPopup:
         total_columns = COLUMNS + day_column
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
-        previous = self._arrow_button("‹", -1)
-        following = self._arrow_button("›", 1)
-        # Not focusable, all three: an override-redirect window gets no focus
+        # Years bracket months, and the doubled glyph takes the coarser step:
+        # at this size the nesting and the stroke count are the only things
+        # telling a year arrow from a month one.
+        year_back = self._arrow_button("«", "Previous year", self._on_year_clicked, -1)
+        month_back = self._arrow_button("‹", "Previous month", self._on_month_clicked, -1)
+        month_forward = self._arrow_button("›", "Next month", self._on_month_clicked, 1)
+        year_forward = self._arrow_button("»", "Next year", self._on_year_clicked, 1)
+        # Not focusable, any of them: an override-redirect window gets no focus
         # from the WM, and a focusable child would still draw a focus ring and
         # swallow the arrow keys the window handler wants.
         self._title.set_relief(Gtk.ReliefStyle.NONE)
@@ -149,9 +155,11 @@ class CalendarPopup:
         self._title.set_tooltip_text("Back to today")
         self._title.connect("clicked", self._on_title_clicked)
 
-        header.pack_start(previous, False, False, 0)
+        header.pack_start(year_back, False, False, 0)
+        header.pack_start(month_back, False, False, 0)
         header.pack_start(self._title, True, True, 0)
-        header.pack_start(following, False, False, 0)
+        header.pack_start(month_forward, False, False, 0)
+        header.pack_start(year_forward, False, False, 0)
         self._grid.attach(header, 0, 0, total_columns, 1)
 
         for column, text in enumerate(self._weekday_labels()):
@@ -181,12 +189,19 @@ class CalendarPopup:
                 cells.append(label)
             self._day_labels.append(cells)
 
-    def _arrow_button(self, text: str, delta: int) -> Gtk.Button:
+    def _arrow_button(
+        self,
+        text: str,
+        tooltip: str,
+        handler: Callable[[Gtk.Button, int], None],
+        delta: int,
+    ) -> Gtk.Button:
         button = Gtk.Button(label=text)
         button.set_relief(Gtk.ReliefStyle.NONE)
         button.set_can_focus(False)
         button.get_style_context().add_class("da-arrow")
-        button.connect("clicked", self._on_arrow_clicked, delta)
+        button.set_tooltip_text(tooltip)
+        button.connect("clicked", handler, delta)
         return button
 
     def _weekday_labels(self) -> tuple[str, ...]:
@@ -358,8 +373,11 @@ class CalendarPopup:
     # Interaction
     # ------------------------------------------------------------------
 
-    def _on_arrow_clicked(self, _button: Gtk.Button, delta: int) -> None:
+    def _on_month_clicked(self, _button: Gtk.Button, delta: int) -> None:
         self.shift_months(delta)
+
+    def _on_year_clicked(self, _button: Gtk.Button, delta: int) -> None:
+        self.shift_years(delta)
 
     def _on_title_clicked(self, _button: Gtk.Button) -> None:
         self.go_today()

@@ -68,11 +68,19 @@ whichever panel grabs second silently receives no input.
 
 ## Using it
 
+```
+«  ‹   August 2026   ›  »
+```
+
+Years bracket months in the header, and the doubled glyph takes the coarser
+step — at 234px the nesting and the stroke count are the only things telling the
+two apart.
+
 | | |
 |---|---|
 | Click the icon | open / close the panel |
-| `←` `→`, `PgUp` `PgDn`, `h` `l` | previous / next month |
-| `↑` `↓`, `k` `j` | previous / next year |
+| `‹` `›`, `←` `→`, `PgUp` `PgDn`, `h` `l` | previous / next month |
+| `«` `»`, `↑` `↓`, `k` `j` | previous / next year |
 | Scroll wheel | previous / next month |
 | `Home`, `t`, `.` | back to today |
 | Click the month title | back to today |
