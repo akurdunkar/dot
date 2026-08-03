@@ -10,10 +10,10 @@
 	dunst --startup-notification true &
 	albert &
 	copyq &
-	gsimplecal &
 	if [ -n "$DISPLAY" ]; then
 		nohup displayd >>/tmp/displayd.log 2>&1 &
 		nohup brightd >>/tmp/brightd.log 2>&1 &
+		nohup da >>/tmp/da.log 2>&1 &
 	fi
 	handy &
 ) 2>&1 >/tmp/dwm.log

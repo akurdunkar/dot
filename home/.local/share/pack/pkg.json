@@ -148,23 +148,6 @@
                     "go install"
                 ]
             },
-            "gsimplecal": {
-                "repo": "akurdunkar/gsimplecal",
-                "requires": [
-                    "apt/autoconf",
-                    "apt/automake",
-                    "apt/pkg-config",
-                    "apt/libgtk-3-dev",
-                    "apt/g++"
-                ],
-                "cmds": [
-                    "tar xzf {artifact} --strip-components=1",
-                    "./autogen.sh",
-                    "./configure --prefix=$HOME/.local --bindir={install_dir}",
-                    "make",
-                    "make install"
-                ]
-            },
             "obsidian": {
                 "repo": "obsidianmd/obsidian-releases",
                 "artifact": "Obsidian-{version}.AppImage",
