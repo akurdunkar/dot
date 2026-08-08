@@ -2,20 +2,6 @@
 
 # Common functions and utilities that can be shared between bash and zsh
 
-cmd_exists() {
-	command -v "$1" 1>/dev/null 2>/dev/null && return 0
-	return 1
-}
-
-fd_command() {
-	cmd_exists fd && printf "fd" || printf "fdfind"
-	printf " --color=never"
-}
-
-# Setting fd as the default source for fzf (respects .gitignore)
-FZF_DEFAULT_COMMAND="$(fd_command) --type f --strip-cwd-prefix --hidden"
-export FZF_DEFAULT_COMMAND
-
 fzf_cmd() {
 	local fzf_height
 	local fzf_opts
@@ -45,7 +31,7 @@ note() {
 	if [[ "$1" == "-d" ]]; then
 		"$EDITOR" "$NOTES_DIR/$(date "+%a_%d_%b.md")"
 	elif [[ "$1" == "-f" ]]; then
-		all_files "$NOTES_DIR" | fzf_cmd | xargs -r -d '\n' "$EDITOR"
+		eval "$FD_CMD . '$NOTES_DIR'" | fzf_cmd | xargs -r -d '\n' "$EDITOR"
 	elif [[ "$1" == "-g" ]]; then
 		cd "$NOTES_DIR" || return
 	elif [[ "$1" != "" ]]; then
@@ -79,14 +65,8 @@ fs() {
 	fzf_cmd | xargs -r -d '\n' "$EDITOR"
 }
 
-all_files() {
-	local fd_cmd
-	fd_cmd=$(fd_command)
-	eval "$fd_cmd . $1"
-}
-
 fn() {
-	all_files "$HOME/.config/nvim/" | fzf_cmd | xargs -r -d '\n' "$EDITOR"
+	eval "$FD_CMD . '$HOME/.config/nvim/'" | fzf_cmd | xargs -r -d '\n' "$EDITOR"
 }
 
 init_nvm() {
