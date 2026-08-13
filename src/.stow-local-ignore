@@ -21,3 +21,9 @@ __pycache__
 \.mypy_cache
 \.venv
 .+\.egg-info
+
+brightd
+calendard
+displayd
+dwm
+slstatus
