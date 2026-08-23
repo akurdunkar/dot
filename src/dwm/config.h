@@ -117,7 +117,7 @@ static Key keys[] = {
   { 0,                                         XF86XK_MonBrightnessUp,      spawn,                 SHCMD("brightd-ctl up 10")},
   { 0,                                         XF86XK_MonBrightnessDown,    spawn,                 SHCMD("brightd-ctl down 10")},
   { Super | ShiftMask,                         XK_F5,                       spawn,                 SHCMD("reload_keys")},
-  { Super,                                     XK_v,                        spawn,                 SHCMD("copyq menu")},
+  { Super,                                     XK_v,                        spawn,                 SHCMD("clipd toggle")},
   { Super | ControlMask,                       XK_s,                        spawn,                 SHCMD("screenshot")},
   { Super | ShiftMask,                         XK_s,                        spawn,                 SHCMD("screenshot -s")},
   { Super | ShiftMask | ControlMask,           XK_t,                        setlayout,             {.v = &layouts[0]} },
