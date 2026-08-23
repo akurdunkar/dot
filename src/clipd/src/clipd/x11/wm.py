@@ -9,6 +9,7 @@ Xinerama is unavailable (bare Xvfb).
 
 from __future__ import annotations
 
+from Xlib import X
 from Xlib.display import Display
 
 from clipd import log
@@ -62,6 +63,40 @@ class WindowDresser:
             dpy.flush()
         except Exception as err:
             _LOG.warning("centering failed: %s", err)
+
+    def focus_target(self) -> str:
+        """Classify the current X input focus: 'client', 'root' or 'other'.
+
+        Managed application windows carry WM_STATE (on themselves or an
+        ancestor). Screenshot overlays, shell HUDs and grabs are unmanaged
+        (no WM_STATE) or leave focus on None — those report 'other', so the
+        popup can ignore them instead of dismissing itself.
+        """
+        try:
+            dpy = self._display()
+            focus = dpy.get_input_focus().focus
+            if isinstance(focus, int):
+                # X.NONE, or the PointerRoot revert state left behind by a
+                # dying grab/overlay — indeterminate, never a reason to act.
+                # (A desktop click under dwm focuses the real root window,
+                # which is classified below.)
+                return "other"
+            root = dpy.screen().root
+            if focus.id == root.id:
+                return "root"
+            wm_state = dpy.intern_atom("WM_STATE")
+            window = focus
+            for _ in range(16):
+                if window.get_full_property(wm_state, X.AnyPropertyType) is not None:
+                    return "client"
+                parent = window.query_tree().parent
+                if isinstance(parent, int) or parent.id == root.id:
+                    break
+                window = parent
+            return "other"
+        except Exception as err:
+            _LOG.debug("focus inspection failed: %s", err)
+            return "other"
 
     def place_near_pointer(self, xid: int, width: int, height: int) -> None:
         """Put a (mapped) window next to the pointer, clamped to its monitor."""

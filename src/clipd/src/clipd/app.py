@@ -63,11 +63,16 @@ class ClipdApp(Adw.Application):
         Adw.Application.do_startup(self)
         self.hold()  # stay alive with no visible window
         Gtk.Window.set_default_icon_name(APP_ID)  # hicolor icon, see data/
+        css = Gtk.CssProvider()
+        css.load_from_string("window.clipd-square { border-radius: 0; }")
+        display = Gdk.Display.get_default()
+        assert display is not None
+        Gtk.StyleContext.add_provider_for_display(
+            display, css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
         self._follow_system_theme()
         self._config = Config.load()
         self._store = Store(db_path())
-        display = Gdk.Display.get_default()
-        assert display is not None
         self._clipboard = ClipboardService(
             display.get_clipboard(), self._store, self._config, self._on_new_entry
         )

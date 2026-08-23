@@ -90,8 +90,8 @@ class SettingsDialog(Adw.PreferencesDialog):
         behaviour = Adw.PreferencesGroup(title="Behaviour")
         behaviour.add(
             _switch(
-                "Hide on focus loss",
-                "Dismiss the popup when it loses focus",
+                "Hide when another window takes focus",
+                "Overlays such as screenshot tools never dismiss the popup",
                 config.hide_on_focus_loss,
                 lambda v: changed(lambda: setattr(config, "hide_on_focus_loss", v)),
             )

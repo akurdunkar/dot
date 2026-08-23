@@ -47,11 +47,15 @@ class ClipWindow(Adw.ApplicationWindow):
         self._all: list[EntryObject] = []
         self._matcher = Matcher("")
         self._active_seen = False  # guards against stale FocusOut on re-show
+        self._focus_watch = 0  # GLib source polling focus while an overlay holds it
         self.connect("realize", self._on_realize)
 
         self.set_default_size(config.window_width, config.window_height)
         self.set_decorated(False)
         self.set_hide_on_close(True)
+        # Undecorated + rounded corners renders black corner cutouts on X11
+        # setups without usable alpha; square corners are deterministic.
+        self.add_css_class("clipd-square")
 
         self._entry = Gtk.SearchEntry(placeholder_text="Fuzzy search\u2026")
         self._entry.set_search_delay(50)  # default 150ms feels laggy in a popup
@@ -190,7 +194,7 @@ class ClipWindow(Adw.ApplicationWindow):
         self, _ctrl: Gtk.EventControllerKey, keyval: int, _keycode: int, state: Gdk.ModifierType
     ) -> bool:
         ctrl = bool(state & Gdk.ModifierType.CONTROL_MASK)
-        if keyval == Gdk.KEY_Escape:
+        if keyval == Gdk.KEY_Escape or (ctrl and keyval == Gdk.KEY_braceleft):
             self.dismiss()
         elif keyval == Gdk.KEY_Down or (ctrl and keyval in (Gdk.KEY_j, Gdk.KEY_n)):
             self._move_selection(+1)
@@ -228,11 +232,13 @@ class ClipWindow(Adw.ApplicationWindow):
         self._entry.set_text("")
         self.refresh()
         self._active_seen = False
+        self._stop_focus_watch()  # a stale watch could dismiss the fresh popup
         self.present()
         self._entry.grab_focus()
         GLib.idle_add(self._dress_and_center)
 
     def dismiss(self) -> None:
+        self._stop_focus_watch()
         self.set_visible(False)
 
     def toggle(self) -> None:
@@ -266,4 +272,25 @@ class ClipWindow(Adw.ApplicationWindow):
             and self._config.hide_on_focus_loss
             and self.get_visible()
         ):
+            # Let the focus transition settle, then dismiss only if focus
+            # landed on a real window or the desktop — not on unmanaged
+            # overlays (screenshot UIs, shell HUDs), which must not close us.
+            # While an overlay holds focus we keep watching: its later
+            # handover to a real window emits no signal on this window.
+            if not self._focus_watch:
+                self._focus_watch = GLib.timeout_add(80, self._watch_foreign_focus)
+
+    def _stop_focus_watch(self) -> None:
+        if self._focus_watch:
+            GLib.source_remove(self._focus_watch)
+            self._focus_watch = 0
+
+    def _watch_foreign_focus(self) -> bool:
+        if not self.get_visible() or self.props.is_active:
+            self._focus_watch = 0
+            return False  # hidden, or focus came back to us
+        if self._dresser.focus_target() != "other":
+            self._focus_watch = 0
             self.dismiss()
+            return False
+        return True  # overlay still holds focus; keep watching

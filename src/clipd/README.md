@@ -29,7 +29,9 @@ dwm systray ◀──XEmbed── tray icon (python-xlib) │ XTEST auto-paste i
 
 Type anywhere to search (fuzzy, smart-case, space-separated AND terms;
 matches highlighted). `↑/↓` or `Ctrl+K/J` move, `Enter` copies + pastes,
-`Ctrl+P` pins, `Ctrl+D` deletes, `Esc` or focus loss dismisses.
+`Ctrl+P` pins, `Ctrl+D` deletes. Dismiss with `Esc`, `Ctrl+{`,
+`clipd toggle`, or by focusing another window — unmanaged overlays like
+screenshot tools never dismiss it.
 
 ## CLI
 

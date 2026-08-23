@@ -27,6 +27,7 @@ class TrayMenu(Gtk.Window):
         self._dresser = dresser
         self._active_seen = False  # guards against stale FocusOut on re-show
         self.set_hide_on_close(True)
+        self.add_css_class("clipd-square")  # see ClipWindow: black corner cutouts
         self.connect("realize", self._on_realize)
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
