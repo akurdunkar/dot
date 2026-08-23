@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "clipd"
+version = "0.1.0"
+description = "Clipboard daemon: fuzzy-searchable history with pins, images and a dwm tray icon"
+requires-python = ">=3.11"
+dependencies = [
+    "PyGObject>=3.42",
+    "python-xlib>=0.33",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+clipd = "clipd.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+# PyGObject-stubs must be installed with PYGOBJECT_STUB_CONFIG=Gtk4,Gdk4 set,
+# or pip may select the GTK3 stubs. See `make dev`.
+[tool.pyright]
+include = ["src", "tests"]
+extraPaths = ["src"]
+pythonVersion = "3.12"
+pythonPlatform = "Linux"
+typeCheckingMode = "strict"
+# gi ships no py.typed of its own; the stub package supplies the types and this
+# warning only reports that the runtime module has no inline annotations.
+reportMissingModuleSource = "none"
+
+# python-xlib ships no stubs at all; everything it returns is Unknown. The
+# Xlib-facing modules are quarantined in x11/ and checked at basic strength.
+[[tool.pyright.executionEnvironments]]
+root = "src/clipd/x11"
+reportMissingTypeStubs = "none"
+reportUnknownMemberType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownVariableType = "none"
+reportUnknownParameterType = "none"
+
+[[tool.pyright.executionEnvironments]]
+root = "tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "src"
