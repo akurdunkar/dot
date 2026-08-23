@@ -242,7 +242,10 @@ class ClipWindow(Adw.ApplicationWindow):
         self.set_visible(False)
 
     def toggle(self) -> None:
-        if self.get_visible() and self.props.is_active:
+        # Purely visibility-based: a visible-but-unfocused popup (e.g. after
+        # an overlay stole focus) must still close, and is-active is not
+        # reliable on every session type.
+        if self.get_visible():
             self.dismiss()
         else:
             self.popup()
