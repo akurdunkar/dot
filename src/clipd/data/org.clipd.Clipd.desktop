@@ -1,0 +1,18 @@
+[Desktop Entry]
+Type=Application
+Name=Clipboard History
+GenericName=Clipboard Manager
+Comment=Fuzzy-searchable clipboard history with pins and images
+# X11 backend even on Wayland sessions: capture, tray and auto-paste
+# are X11 protocols; under Wayland the compositor syncs the clipboard
+# into XWayland, so history still works (paste injection reaches only
+# XWayland windows there). Full behaviour on the Xorg session.
+Exec=env GDK_BACKEND=x11 clipd show
+TryExec=clipd
+Icon=org.clipd.Clipd
+Terminal=false
+Categories=Utility;GTK;
+Keywords=clipboard;history;paste;copy;snippets;
+StartupNotify=false
+StartupWMClass=clipd
+SingleMainWindow=true

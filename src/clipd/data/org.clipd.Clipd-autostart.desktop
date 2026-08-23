@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=clipd daemon
+Comment=Clipboard history daemon (background)
+Exec=env GDK_BACKEND=x11 clipd
+TryExec=clipd
+Icon=org.clipd.Clipd
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

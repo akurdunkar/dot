@@ -16,7 +16,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, Gio, GLib
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 from clipd import APP_ID, __version__, log
 from clipd.clipboard import ClipboardService
@@ -62,6 +62,7 @@ class ClipdApp(Adw.Application):
     def do_startup(self) -> None:
         Adw.Application.do_startup(self)
         self.hold()  # stay alive with no visible window
+        Gtk.Window.set_default_icon_name(APP_ID)  # hicolor icon, see data/
         self._follow_system_theme()
         self._config = Config.load()
         self._store = Store(db_path())

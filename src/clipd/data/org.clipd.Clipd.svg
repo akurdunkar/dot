@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- clipd: clipboard board, paper, clip tab; the blue line is the fuzzy match -->
+  <defs>
+    <linearGradient id="board" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#62a0ea"/>
+      <stop offset="1" stop-color="#3584e4"/>
+    </linearGradient>
+  </defs>
+  <rect x="20" y="12" width="88" height="106" rx="16" fill="url(#board)"/>
+  <rect x="20" y="12" width="88" height="106" rx="16" fill="none"
+        stroke="#1a5fb4" stroke-width="2" opacity="0.6"/>
+  <rect x="30" y="26" width="68" height="82" rx="9" fill="#fafafa"/>
+  <rect x="46" y="4" width="36" height="22" rx="8" fill="#1a5fb4"/>
+  <rect x="52" y="9" width="24" height="7" rx="3.5" fill="#99c1f1"/>
+  <rect x="40" y="42" width="48" height="8" rx="4" fill="#77767b"/>
+  <rect x="40" y="60" width="48" height="8" rx="4" fill="#3584e4"/>
+  <rect x="40" y="78" width="31" height="8" rx="4" fill="#c0bfbc"/>
+</svg>

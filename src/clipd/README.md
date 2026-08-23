@@ -66,6 +66,24 @@ floats and centers it without any rules. Start the daemon from dwm's
 autostart (`nohup clipd &`) or `systemctl --user enable --now clipd`
 (import `DISPLAY` and `DBUS_SESSION_BUS_ADDRESS` first). Pick one method.
 
+## Ubuntu / GNOME (and other XDG desktops)
+
+`make install` also installs a desktop entry (“Clipboard History”) and a
+hicolor icon; `make autostart` adds the standard XDG login-start entry
+(GNOME/KDE/XFCE honour it, dwm ignores it — no double-start risk). Bind a
+custom shortcut in Settings → Keyboard to `clipd toggle`; note GNOME uses
+Super+V for the notification list, so rebind that first or pick another
+combo. The desktop entries force `GDK_BACKEND=x11`:
+
+- **Xorg session** (“Ubuntu on Xorg” at the login screen): everything
+  works. GNOME has no XEmbed tray, so the tray icon simply stays dormant;
+  the popup, shortcut and CLI are unaffected.
+- **Wayland session**: the compositor syncs the clipboard into XWayland,
+  so capture and history still work; XTEST auto-paste only reaches
+  XWayland windows (disable auto-paste in Settings if that annoys). A
+  native backend would slot into `clipboard.py` via the
+  `ext-data-control` protocol — the seam is ready, not implemented.
+
 ## Layout
 
 ```
