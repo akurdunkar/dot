@@ -11,7 +11,7 @@ vim.g["mapleader"]                     = " "
 
 vim.cmd [[
     syntax enable
-    color solarized
+    color lunaperche
     syntax on
 ]]
 
